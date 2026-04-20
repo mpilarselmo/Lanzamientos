@@ -1886,7 +1886,26 @@ function buildLanzamientoReport() {
       ns15 = entry.cantidadPedida > 0 ? (facturado15 / entry.cantidadPedida) * 100 : 0;
     }
     entry.ns15 = ns15;
-    
+
+    // NS hasta hoy (fecha de análisis)
+    let nsToday = 0;
+    if (fechaInicioDate) {
+      let facturadoHastaHoy = 0;
+      for (const row of entry.estadoRows) {
+        const fecha = parseDateValue(row[state.columns.estadoFecha]);
+        if (fecha && fecha <= hoy) {
+          const ultimo = parseIntSafe(row[state.columns.estadoUltimo]);
+          const siguiente = parseIntSafe(row[state.columns.estadoSiguiente]);
+          const category = classifyEstado(ultimo, siguiente);
+          if (category === "facturada_hoy_580_610" || category === "facturada_610_999") {
+            facturadoHastaHoy += getEstadoRowCantidad(row, category);
+          }
+        }
+      }
+      nsToday = entry.cantidadPedida > 0 ? (facturadoHastaHoy / entry.cantidadPedida) * 100 : 0;
+    }
+    entry.ns = nsToday;
+
     // Días a 100%
     let daysTo100 = null;
     if (fechaInicioDate && entry.estadoRows.length) {
@@ -1945,7 +1964,7 @@ for (const entry of reportMap.values()) {
         cantidadCancelado: Math.round(entry.cancelado),
         pctCancelado,
         diasRestantes,
-        nivelServicio: pctAvanceTotal,
+        nivelServicio: entry.ns,
         ns15: entry.ns15,
         daysTo100: entry.daysTo100,
       });

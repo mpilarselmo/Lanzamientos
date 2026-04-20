@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LANZA Analisis Web</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="bg-shape bg-shape-a"></div>
+  <div class="bg-shape bg-shape-b"></div>
+
+  <main class="app-shell">
+    <header class="hero">
+      <h1>LANZA Analisis</h1>
+      <p>Version HTML/CSS/JS para cargar archivos manuales y analizar avance con rango de fechas.</p>
+      <a href="historico.html" class="btn btn-secondary">Ver Histórico</a>
+    </header>
+
+    <section class="panel panel-upload">
+      <h2>Archivos</h2>
+      <div id="launchPlansContainer" class="upload-grid launch-plans-grid">
+        <div class="launch-plan-row">
+          <label class="field">
+            <span>Plan Lanzamiento</span>
+            <input type="file" class="launch-file-input" accept=".xlsx,.xls,.csv">
+          </label>
+          <label class="field">
+            <span>Fecha inicio lanzamiento</span>
+            <input type="text" class="launch-date-input" placeholder="dd/mm/aaaa o 1 abril 2026" inputmode="text">
+          </label>
+        </div>
+      </div>
+      <div class="actions">
+        <button id="addLaunchPlanBtn" type="button" class="btn btn-secondary">+ Añadir lanzamiento</button>
+      </div>
+      <div class="upload-grid">
+        <label class="field">
+          <span>Archivo de estado (obligatorio)</span>
+          <input id="estadoFile" type="file" accept=".xlsx,.xls,.csv">
+        </label>
+      </div>
+      <div class="actions">
+        <button id="loadBtn" class="btn btn-primary">Cargar y preparar analisis</button>
+      </div>
+      <div class="actions">
+        <button id="saveHistoryBtn" class="btn btn-secondary" disabled>Guardar histórico</button>
+        <button id="closeMonthBtn" class="btn btn-secondary" disabled>Cerrar mes</button>
+      </div>
+      <p id="saveHistoryStatus" class="hint"></p>
+      <p id="loadStatus" class="hint"></p>
+    </section>
+
+    <section id="filtersSection" class="panel hidden">
+      <h2>Filtros</h2>
+      <div class="filters-grid">
+        <label class="field toggle-field">
+          <span>Aplicar filtros</span>
+          <input id="applyFilters" type="checkbox" checked>
+        </label>
+
+        <label class="field">
+          <span>Fecha vigencia</span>
+          <input id="vigenciaDate" type="text" placeholder="dd/mm/aaaa" inputmode="text">
+        </label>
+
+        <label class="field">
+          <span>OC cliente</span>
+          <select id="ocSelect"></select>
+        </label>
+
+        <div class="field full">
+          <span>TP Ord</span>
+          <div id="tpContainer" class="tp-grid"></div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="applyBtn" class="btn">Aplicar filtros y actualizar</button>
+      </div>
+      <p id="filtersMeta" class="hint"></p>
+    </section>
+
+    <section id="lanzamientoSection" class="panel hidden">
+      <h2>Lanzamiento consolidado</h2>
+      <div class="table-wrap lanzamiento-table-wrap">
+        <table id="lanzamientoTable">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="resultsSection" class="panel hidden">
+      <h2>Resultados</h2>
+      <div id="cards" class="cards"></div>
+
+      <div class="chart-toolbar">
+        <label class="field">
+          <span>Tipo de grafico</span>
+          <select id="chartType">
+            <option value="bar">Barras</option>
+            <option value="pie">Torta</option>
+            <option value="line">Lineas en el tiempo</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="chart-wrap">
+        <canvas id="statusChart"></canvas>
+      </div>
+
+      <div id="comparisonControls" class="hidden">
+        <div class="table-actions">
+          <button id="exportBtn" class="btn">Exportar comparativo CSV</button>
+          <button id="exportDetailedBtn" class="btn">Exportar detalle estados Excel</button>
+        </div>
+
+        <div class="table-wrap">
+          <table id="comparisonTable">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Extraer Excel</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <h1>Carga el archivo Negocio-segmento.xlsx</h1>
+  <input type="file" id="fileInput" accept=".xlsx,.xls">
+  <button onclick="processFile()">Procesar</button>
+  <pre id="output"></pre>
+
+  <script>
+    function processFile() {
+      const file = document.getElementById('fileInput').files[0];
+      if (!file) {
+        alert('Selecciona un archivo');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const data = e.target.result;
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheetName = workbook.SheetNames[0];
+        const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
+        
+        // Mostrar como objeto JavaScript
+        const output = 'const NEGOCIO_SEGMENTO_DATA = ' + JSON.stringify(rows, null, 2) + ';';
+        document.getElementById('output').textContent = output;
+      };
+      reader.readAsArrayBuffer(file);
+    }
+  </script>
+</body>
+</html>

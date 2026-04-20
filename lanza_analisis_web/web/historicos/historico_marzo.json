@@ -1,0 +1,47 @@
+{
+  "mes": "marzo",
+  "anio": 2026,
+  "negocios": {
+    "Chocolates": {
+      "ns_15_dias": 95.5,
+      "ns": 92.3,
+      "facturado": 88.7,
+      "cancelado": 4.2
+    },
+    "Golosinas": {
+      "ns_15_dias": 90.0,
+      "ns": 85.5,
+      "facturado": 80.2,
+      "cancelado": 5.1
+    }
+  },
+  "ocs": [
+    {
+      "id": "lanza_6_001",
+      "negocio": "Chocolates",
+      "incluido": true,
+      "ns_15_dias": 100,
+      "ns": 95,
+      "facturado": 90,
+      "cancelado": 5
+    },
+    {
+      "id": "lanza_7_002",
+      "negocio": "Golosinas",
+      "incluido": true,
+      "ns_15_dias": 90,
+      "ns": 85,
+      "facturado": 80,
+      "cancelado": 10
+    },
+    {
+      "id": "lanza_8_003",
+      "negocio": "Chocolates",
+      "incluido": false,
+      "ns_15_dias": 85,
+      "ns": 80,
+      "facturado": 75,
+      "cancelado": 15
+    }
+  ]
+}

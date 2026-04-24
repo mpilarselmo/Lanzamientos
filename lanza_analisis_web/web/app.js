@@ -1431,7 +1431,7 @@ function buildComparison(pedidoByArticle, estadoByArticle) {
     const totalFacturado = estadoItem.facturada_hoy_580_610 + estadoItem.facturada_610_999;
     rows.push({
       articulo,
-      descripcion: pedidoItem.descripcion || estadoItem.descripcion || "",
+      descripcion: estadoItem.descripcion || pedidoItem.descripcion || "",
       pedido: pedidoItem.pedido,
       negocio,
       segmento,
@@ -2063,6 +2063,7 @@ for (const entry of reportMap.values()) {
         negocio: entry.negocio,
         segmento: entry.segmento,
         articulo: entry.articulo,
+        descripcion: entry.descripcion || "",
         fechaInicio: fechaInicioText,
         cantidadPedida: Math.round(entry.cantidadPedida),
         cantidadFacturada: Math.round(cantidadFacturadaTotal),
@@ -2114,6 +2115,7 @@ function renderLanzamientoReport() {
     { key: "oc", label: "OC" },
     { key: "negocio", label: "Negocio" },
     { key: "articulo", label: "Articulo" },
+    { key: "descripcion", label: "Descripcion" },
     { key: "fechaInicio", label: "Fecha Inicio" },
     { key: "cantidadPedida", label: "Plan" },
     { key: "cantidadFacturada", label: "Bultos Facturados" },

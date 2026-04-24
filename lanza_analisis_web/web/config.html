@@ -34,6 +34,17 @@
     </section>
 
     <section class="panel">
+      <h2>Editor semaforo historico</h2>
+      <div id="gaugeConfigGrid" class="config-grid"></div>
+      <div class="actions">
+        <button id="saveGaugeBtn" class="btn btn-primary">Guardar colores semaforo</button>
+        <button id="resetGaugeBtn" class="btn btn-secondary">Restaurar semaforo predeterminado</button>
+      </div>
+      <p id="gaugeStatusMsg" class="hint"></p>
+      <div id="gaugePreviewBar" class="preview-bar"></div>
+    </section>
+
+    <section class="panel">
       <h2>Vista rapida</h2>
       <div id="previewBar" class="preview-bar"></div>
     </section>
@@ -41,6 +52,7 @@
 
   <script>
     const METRIC_COLORS_STORAGE_KEY = "lanza_metric_colors";
+    const GAUGE_COLORS_STORAGE_KEY = "lanza_historico_gauge_colors";
 
     const CATEGORY_LABELS = {
       facturada_hoy_580_610: "Facturado hoy 580/610",
@@ -75,8 +87,23 @@
       otros: "#888888",
     };
 
+    const DEFAULT_GAUGE_COLORS = {
+      high: "#2e7d32",
+      medium: "#f9a825",
+      low: "#c62828",
+    };
+
+    const GAUGE_LABELS = {
+      high: "NS >= 90",
+      medium: "NS >= 70 y < 90",
+      low: "NS < 70",
+    };
+
+    const GAUGE_ORDER = ["high", "medium", "low"];
+
     const state = {
       colors: { ...DEFAULT_METRIC_COLORS },
+      gaugeColors: { ...DEFAULT_GAUGE_COLORS },
     };
 
     const els = {
@@ -85,6 +112,11 @@
       statusMsg: document.getElementById("statusMsg"),
       saveBtn: document.getElementById("saveBtn"),
       resetBtn: document.getElementById("resetBtn"),
+      gaugeConfigGrid: document.getElementById("gaugeConfigGrid"),
+      gaugePreviewBar: document.getElementById("gaugePreviewBar"),
+      gaugeStatusMsg: document.getElementById("gaugeStatusMsg"),
+      saveGaugeBtn: document.getElementById("saveGaugeBtn"),
+      resetGaugeBtn: document.getElementById("resetGaugeBtn"),
     };
 
     function normalizeHexColor(value) {
@@ -113,9 +145,35 @@
       state.colors = next;
     }
 
+    function loadGaugeColors() {
+      const next = { ...DEFAULT_GAUGE_COLORS };
+      try {
+        const raw = localStorage.getItem(GAUGE_COLORS_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object") {
+            for (const key of GAUGE_ORDER) {
+              const normalized = normalizeHexColor(parsed[key]);
+              if (normalized) {
+                next[key] = normalized;
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.warn("No se pudo cargar colores de semaforo", error);
+      }
+      state.gaugeColors = next;
+    }
+
     function saveColors() {
       localStorage.setItem(METRIC_COLORS_STORAGE_KEY, JSON.stringify(state.colors));
       els.statusMsg.textContent = "Colores guardados. Si tenes el analisis abierto, actualiza la pagina para verlos.";
+    }
+
+    function saveGaugeColors() {
+      localStorage.setItem(GAUGE_COLORS_STORAGE_KEY, JSON.stringify(state.gaugeColors));
+      els.gaugeStatusMsg.textContent = "Colores de semaforo guardados. Actualiza el historico si lo tenes abierto.";
     }
 
     function createColorRow(categoryKey) {
@@ -185,6 +243,70 @@
       }
     }
 
+    function createGaugeColorRow(levelKey) {
+      const row = document.createElement("div");
+      row.className = "config-row";
+
+      const label = document.createElement("div");
+      label.className = "config-label";
+      label.textContent = GAUGE_LABELS[levelKey] || levelKey;
+
+      const inputWrap = document.createElement("div");
+      inputWrap.className = "color-input-group";
+
+      const picker = document.createElement("input");
+      picker.type = "color";
+      picker.value = state.gaugeColors[levelKey];
+
+      const text = document.createElement("input");
+      text.type = "text";
+      text.value = state.gaugeColors[levelKey];
+      text.maxLength = 7;
+      text.className = "hex-input";
+
+      picker.addEventListener("input", () => {
+        const value = normalizeHexColor(picker.value);
+        if (!value) return;
+        state.gaugeColors[levelKey] = value;
+        text.value = value;
+        renderGaugePreview();
+      });
+
+      text.addEventListener("change", () => {
+        const value = normalizeHexColor(text.value);
+        if (!value) {
+          text.value = state.gaugeColors[levelKey];
+          return;
+        }
+        state.gaugeColors[levelKey] = value;
+        picker.value = value;
+        text.value = value;
+        renderGaugePreview();
+      });
+
+      inputWrap.append(picker, text);
+      row.append(label, inputWrap);
+      return row;
+    }
+
+    function renderGaugeConfigRows() {
+      els.gaugeConfigGrid.innerHTML = "";
+      for (const key of GAUGE_ORDER) {
+        els.gaugeConfigGrid.appendChild(createGaugeColorRow(key));
+      }
+    }
+
+    function renderGaugePreview() {
+      els.gaugePreviewBar.innerHTML = "";
+      for (const key of GAUGE_ORDER) {
+        const chip = document.createElement("div");
+        chip.className = "preview-chip";
+        chip.style.backgroundColor = state.gaugeColors[key];
+        chip.textContent = GAUGE_LABELS[key];
+        els.gaugePreviewBar.appendChild(chip);
+      }
+    }
+
     els.saveBtn.addEventListener("click", saveColors);
     els.resetBtn.addEventListener("click", () => {
       state.colors = { ...DEFAULT_METRIC_COLORS };
@@ -193,9 +315,20 @@
       els.statusMsg.textContent = "Colores restaurados a predeterminados. Guarda para aplicar.";
     });
 
+    els.saveGaugeBtn.addEventListener("click", saveGaugeColors);
+    els.resetGaugeBtn.addEventListener("click", () => {
+      state.gaugeColors = { ...DEFAULT_GAUGE_COLORS };
+      renderGaugeConfigRows();
+      renderGaugePreview();
+      els.gaugeStatusMsg.textContent = "Colores de semaforo restaurados. Guarda para aplicar.";
+    });
+
     loadColors();
     renderConfigRows();
     renderPreview();
+    loadGaugeColors();
+    renderGaugeConfigRows();
+    renderGaugePreview();
   </script>
 </body>
 </html>

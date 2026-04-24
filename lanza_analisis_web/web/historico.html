@@ -70,6 +70,53 @@
   <script>
     let historicos = {};
     const chartInstances = new Map();
+    const GAUGE_COLORS_STORAGE_KEY = 'lanza_historico_gauge_colors';
+
+    const DEFAULT_GAUGE_COLORS = {
+      high: '#2e7d32',
+      medium: '#f9a825',
+      low: '#c62828',
+    };
+
+    let gaugeColors = { ...DEFAULT_GAUGE_COLORS };
+
+    function normalizeHexColor(value) {
+      const hex = String(value || '').trim();
+      return /^#[0-9a-fA-F]{6}$/.test(hex) ? hex.toLowerCase() : null;
+    }
+
+    function loadGaugeColorsFromStorage() {
+      const nextColors = { ...DEFAULT_GAUGE_COLORS };
+      try {
+        const raw = localStorage.getItem(GAUGE_COLORS_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            Object.keys(DEFAULT_GAUGE_COLORS).forEach((key) => {
+              const normalized = normalizeHexColor(parsed[key]);
+              if (normalized) {
+                nextColors[key] = normalized;
+              }
+            });
+          }
+        }
+      } catch (error) {
+        console.warn('No se pudo cargar configuración de colores del histórico:', error);
+      }
+
+      gaugeColors = nextColors;
+    }
+
+    function getGaugeColorForValue(value) {
+      if (value >= 90) return gaugeColors.high;
+      if (value >= 70) return gaugeColors.medium;
+      return gaugeColors.low;
+    }
+
+    function refreshAllMetrics() {
+      updateNegocioMetrics();
+      updateOCMetrics();
+    }
 
     function toNumber(value) {
       const n = Number(value);
@@ -401,7 +448,7 @@
         data: {
           datasets: [{
             data: [safeValue, 100 - safeValue],
-            backgroundColor: [safeValue >= 90 ? 'green' : safeValue >= 70 ? 'yellow' : 'red', '#e0e0e0'],
+            backgroundColor: [getGaugeColorForValue(safeValue), '#e0e0e0'],
             borderWidth: 0
           }]
         },
@@ -454,6 +501,14 @@
       loadHistoricos();
     });
 
+    window.addEventListener('storage', (event) => {
+      if (event.key === GAUGE_COLORS_STORAGE_KEY) {
+        loadGaugeColorsFromStorage();
+        refreshAllMetrics();
+      }
+    });
+
+    loadGaugeColorsFromStorage();
     loadHistoricos();
   </script>
 </body>

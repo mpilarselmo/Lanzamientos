@@ -12,7 +12,10 @@ const state = {
   negocioSourceRows: [],
   currentMonth: null,
   currentYear: null,
+  metricColors: {},
 };
+
+const METRIC_COLORS_STORAGE_KEY = "lanza_metric_colors";
 
 // Datos hardcodeados de Negocio-Segmento
 const NEGOCIO_SEGMENTO_DATA = [
@@ -115,6 +118,17 @@ const CATEGORY_ORDER = [
   "otros",
 ];
 
+const DEFAULT_METRIC_COLORS = {
+  facturada_hoy_580_610: "#2f8f83",
+  facturada_610_999: "#3987cf",
+  depurado_980_984_999: "#d48f33",
+  listo_cargar_560_565: "#5f6ee0",
+  carga_proceso_535_555: "#8f63d7",
+  sin_carga_menor_535: "#7a8d2b",
+  depurado_cuota_527: "#cb5f5f",
+  otros: "#888888",
+};
+
 const els = {
   estadoFile: document.getElementById("estadoFile"),
   launchPlansContainer: document.getElementById("launchPlansContainer"),
@@ -163,6 +177,46 @@ els.vigenciaDate.addEventListener("change", () => {
 });
 
 initializeLaunchPlanRows();
+loadMetricColorsFromStorage();
+
+window.addEventListener("storage", (event) => {
+  if (event.key === METRIC_COLORS_STORAGE_KEY) {
+    loadMetricColorsFromStorage();
+    renderChart();
+  }
+});
+
+function normalizeHexColor(value) {
+  const hex = String(value || "").trim();
+  return /^#[0-9a-fA-F]{6}$/.test(hex) ? hex.toLowerCase() : null;
+}
+
+function loadMetricColorsFromStorage() {
+  const nextColors = { ...DEFAULT_METRIC_COLORS };
+
+  try {
+    const raw = localStorage.getItem(METRIC_COLORS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        for (const key of Object.keys(DEFAULT_METRIC_COLORS)) {
+          const normalized = normalizeHexColor(parsed[key]);
+          if (normalized) {
+            nextColors[key] = normalized;
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.warn("No se pudo leer configuración de colores:", error);
+  }
+
+  state.metricColors = nextColors;
+}
+
+function getMetricColor(categoryKey) {
+  return state.metricColors[categoryKey] || DEFAULT_METRIC_COLORS[categoryKey] || "#888888";
+}
 
 function normalizeLabel(value) {
   return String(value || "")
@@ -1475,6 +1529,7 @@ function renderChart() {
   }
 
   const labels = CATEGORY_ORDER.slice(0, 7).map((key) => CATEGORY_LABELS[key]);
+  const chartCategories = CATEGORY_ORDER.slice(0, 7);
   const values = [
     totals.facturada_hoy_580_610,
     totals.facturada_610_999,
@@ -1484,6 +1539,7 @@ function renderChart() {
     totals.sin_carga_menor_535,
     totals.depurado_cuota_527,
   ].map((value) => Math.round(value));
+  const colors = chartCategories.map((categoryKey) => getMetricColor(categoryKey));
 
   state.chart = new Chart(ctx, {
     type: chartMode === "pie" ? "pie" : "bar",
@@ -1493,7 +1549,7 @@ function renderChart() {
         {
           label: "Cantidad",
           data: values,
-          backgroundColor: ["#2f8f83", "#3987cf", "#d48f33", "#5f6ee0", "#8f63d7", "#7a8d2b", "#cb5f5f"],
+          backgroundColor: colors,
         },
       ],
     },
@@ -1533,17 +1589,6 @@ function buildLineSeries() {
     return parsed ? toSlashDateValue(parsed) : iso;
   });
 
-  const colors = {
-    facturada_hoy_580_610: "#2f8f83",
-    facturada_610_999: "#3987cf",
-    depurado_980_984_999: "#d48f33",
-    listo_cargar_560_565: "#5f6ee0",
-    carga_proceso_535_555: "#8f63d7",
-    sin_carga_menor_535: "#7a8d2b",
-    depurado_cuota_527: "#cb5f5f",
-    otros: "#888888",
-  };
-
   const datasets = CATEGORY_ORDER.map((cat) => {
     const values = isoLabels.map((dateKey) => Math.round(bucket.get(`${dateKey}|${cat}`) || 0));
     const sum = values.reduce((acc, value) => acc + value, 0);
@@ -1553,8 +1598,8 @@ function buildLineSeries() {
     return {
       label: CATEGORY_LABELS[cat],
       data: values,
-      borderColor: colors[cat],
-      backgroundColor: colors[cat],
+      borderColor: getMetricColor(cat),
+      backgroundColor: getMetricColor(cat),
       fill: false,
       tension: 0.2,
     };

@@ -69,6 +69,13 @@ body {
   color: var(--muted);
 }
 
+.hero-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .panel {
   background: color-mix(in srgb, var(--panel) 92%, #f0f6ef 8%);
   border: 1px solid var(--line);
@@ -209,6 +216,60 @@ body {
   background: var(--chip);
   border-radius: 8px;
   font-size: 0.9rem;
+}
+
+.config-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.config-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  padding: 10px 12px;
+  gap: 10px;
+}
+
+.config-label {
+  font-size: 0.92rem;
+  color: var(--ink);
+}
+
+.color-input-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hex-input {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 10px;
+  width: 100px;
+  text-transform: lowercase;
+  font: inherit;
+}
+
+.preview-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px;
+}
+
+.preview-chip {
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
   padding: 12px;

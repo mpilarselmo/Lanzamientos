@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Configuracion de Colores - LANZA</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="bg-shape bg-shape-a"></div>
+  <div class="bg-shape bg-shape-b"></div>
+
+  <main class="app-shell">
+    <header class="hero">
+      <h1>Configuracion de Colores</h1>
+      <p>Edita los colores usados por las metricas en graficos. Los cambios se guardan automaticamente para este navegador.</p>
+      <div class="hero-actions">
+        <a href="index.html" class="btn btn-secondary">Volver a analisis</a>
+        <a href="historico.html" class="btn btn-secondary">Ver historico</a>
+      </div>
+    </header>
+
+    <section class="panel">
+      <h2>Editor de metricas</h2>
+      <div id="configGrid" class="config-grid"></div>
+      <div class="actions">
+        <button id="saveBtn" class="btn btn-primary">Guardar colores</button>
+        <button id="resetBtn" class="btn btn-secondary">Restaurar predeterminados</button>
+      </div>
+      <p id="statusMsg" class="hint"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Vista rapida</h2>
+      <div id="previewBar" class="preview-bar"></div>
+    </section>
+  </main>
+
+  <script>
+    const METRIC_COLORS_STORAGE_KEY = "lanza_metric_colors";
+
+    const CATEGORY_LABELS = {
+      facturada_hoy_580_610: "Facturado hoy 580/610",
+      facturada_610_999: "Facturado 610/999",
+      depurado_980_984_999: "Depurado 980/999 y 984/999",
+      listo_cargar_560_565: "Listo cargar 560/565",
+      carga_proceso_535_555: "Carga proceso 535-555",
+      sin_carga_menor_535: "Sin carga < 535",
+      depurado_cuota_527: "Depurado cuota 527",
+      otros: "Otros",
+    };
+
+    const CATEGORY_ORDER = [
+      "facturada_hoy_580_610",
+      "facturada_610_999",
+      "depurado_980_984_999",
+      "listo_cargar_560_565",
+      "carga_proceso_535_555",
+      "sin_carga_menor_535",
+      "depurado_cuota_527",
+      "otros",
+    ];
+
+    const DEFAULT_METRIC_COLORS = {
+      facturada_hoy_580_610: "#2f8f83",
+      facturada_610_999: "#3987cf",
+      depurado_980_984_999: "#d48f33",
+      listo_cargar_560_565: "#5f6ee0",
+      carga_proceso_535_555: "#8f63d7",
+      sin_carga_menor_535: "#7a8d2b",
+      depurado_cuota_527: "#cb5f5f",
+      otros: "#888888",
+    };
+
+    const state = {
+      colors: { ...DEFAULT_METRIC_COLORS },
+    };
+
+    const els = {
+      configGrid: document.getElementById("configGrid"),
+      previewBar: document.getElementById("previewBar"),
+      statusMsg: document.getElementById("statusMsg"),
+      saveBtn: document.getElementById("saveBtn"),
+      resetBtn: document.getElementById("resetBtn"),
+    };
+
+    function normalizeHexColor(value) {
+      const hex = String(value || "").trim();
+      return /^#[0-9a-fA-F]{6}$/.test(hex) ? hex.toLowerCase() : null;
+    }
+
+    function loadColors() {
+      const next = { ...DEFAULT_METRIC_COLORS };
+      try {
+        const raw = localStorage.getItem(METRIC_COLORS_STORAGE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object") {
+            for (const key of Object.keys(DEFAULT_METRIC_COLORS)) {
+              const normalized = normalizeHexColor(parsed[key]);
+              if (normalized) {
+                next[key] = normalized;
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.warn("No se pudo cargar configuracion de colores", error);
+      }
+      state.colors = next;
+    }
+
+    function saveColors() {
+      localStorage.setItem(METRIC_COLORS_STORAGE_KEY, JSON.stringify(state.colors));
+      els.statusMsg.textContent = "Colores guardados. Si tenes el analisis abierto, actualiza la pagina para verlos.";
+    }
+
+    function createColorRow(categoryKey) {
+      const row = document.createElement("div");
+      row.className = "config-row";
+
+      const label = document.createElement("div");
+      label.className = "config-label";
+      label.textContent = CATEGORY_LABELS[categoryKey] || categoryKey;
+
+      const inputWrap = document.createElement("div");
+      inputWrap.className = "color-input-group";
+
+      const picker = document.createElement("input");
+      picker.type = "color";
+      picker.value = state.colors[categoryKey];
+      picker.dataset.category = categoryKey;
+
+      const text = document.createElement("input");
+      text.type = "text";
+      text.value = state.colors[categoryKey];
+      text.maxLength = 7;
+      text.className = "hex-input";
+      text.dataset.category = categoryKey;
+
+      picker.addEventListener("input", () => {
+        const value = normalizeHexColor(picker.value);
+        if (!value) return;
+        state.colors[categoryKey] = value;
+        text.value = value;
+        renderPreview();
+      });
+
+      text.addEventListener("change", () => {
+        const value = normalizeHexColor(text.value);
+        if (!value) {
+          text.value = state.colors[categoryKey];
+          return;
+        }
+        state.colors[categoryKey] = value;
+        picker.value = value;
+        text.value = value;
+        renderPreview();
+      });
+
+      inputWrap.append(picker, text);
+      row.append(label, inputWrap);
+      return row;
+    }
+
+    function renderConfigRows() {
+      els.configGrid.innerHTML = "";
+      for (const key of CATEGORY_ORDER) {
+        els.configGrid.appendChild(createColorRow(key));
+      }
+    }
+
+    function renderPreview() {
+      els.previewBar.innerHTML = "";
+      for (const key of CATEGORY_ORDER) {
+        const chip = document.createElement("div");
+        chip.className = "preview-chip";
+        chip.style.backgroundColor = state.colors[key];
+        chip.title = CATEGORY_LABELS[key];
+        chip.textContent = CATEGORY_LABELS[key];
+        els.previewBar.appendChild(chip);
+      }
+    }
+
+    els.saveBtn.addEventListener("click", saveColors);
+    els.resetBtn.addEventListener("click", () => {
+      state.colors = { ...DEFAULT_METRIC_COLORS };
+      renderConfigRows();
+      renderPreview();
+      els.statusMsg.textContent = "Colores restaurados a predeterminados. Guarda para aplicar.";
+    });
+
+    loadColors();
+    renderConfigRows();
+    renderPreview();
+  </script>
+</body>
+</html>

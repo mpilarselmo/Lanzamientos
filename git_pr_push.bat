@@ -3,6 +3,8 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 cd /d "%~dp0"
 set "EXIT_CODE=0"
+set "PR_URL="
+set "PR_STATUS=NO_CREADO"
 
 echo [1/9] Verificando repo...
 git rev-parse --is-inside-work-tree >nul 2>nul
@@ -15,14 +17,6 @@ if errorlevel 1 (
 echo [2/9] Estado actual...
 git status -sb
 if errorlevel 1 goto :error
-
-echo.
-set "STEP_PAUSE=N"
-set /p STEP_PAUSE=Activar pausa por paso para ver ejecucion? (S/N) [N]: 
-if /i "!STEP_PAUSE!"=="S" set "STEP_PAUSE=Y"
-if /i not "!STEP_PAUSE!"=="Y" set "STEP_PAUSE=N"
-
-call :maybe_pause "Estado revisado"
 
 echo.
 set "BASE_BRANCH=main"
@@ -38,8 +32,6 @@ if not defined WORK_BRANCH (
   goto :end
 )
 
-call :maybe_pause "Ramas ingresadas"
-
 echo.
 echo [3/9] Creando/cambiando a rama !WORK_BRANCH!...
 git show-ref --verify --quiet refs/heads/!WORK_BRANCH!
@@ -50,14 +42,10 @@ if errorlevel 1 (
 )
 if errorlevel 1 goto :error
 
-call :maybe_pause "Rama de trabajo lista"
-
 echo.
 echo [4/9] Agregando cambios (git add .)...
 git add .
 if errorlevel 1 goto :error
-
-call :maybe_pause "Cambios agregados"
 
 echo.
 set "COMMIT_MSG="
@@ -81,8 +69,6 @@ echo [7/9] Enviando rama !WORK_BRANCH! a origin...
 git push -u origin !WORK_BRANCH!
 if errorlevel 1 goto :error
 
-call :maybe_pause "Push completado"
-
 echo.
 echo [8/9] Preparando URL de PR...
 call :get_repo_url
@@ -91,8 +77,6 @@ if errorlevel 1 goto :error
 set "PR_URL=!REPO_URL!/compare/!BASE_BRANCH!...!WORK_BRANCH!?expand=1"
 echo URL para crear PR: !PR_URL!
 
-call :maybe_pause "URL de PR generada"
-
 echo.
 echo [9/9] Intentando crear PR automatico con GitHub CLI (gh)...
 where gh >nul 2>nul
@@ -100,6 +84,7 @@ if errorlevel 1 (
   echo gh no esta instalado. Abriendo link para crear PR manualmente...
   echo En GitHub: click en "Compare ^& pull request" y luego "Create pull request".
   start "" "!PR_URL!"
+  set "PR_STATUS=MANUAL_PENDIENTE"
   goto :summary
 )
 
@@ -116,10 +101,12 @@ if errorlevel 1 (
   echo No se pudo crear el PR automatico. Abriendo link manual...
   echo En GitHub: click en "Compare ^& pull request" y luego "Create pull request".
   start "" "!PR_URL!"
+  set "PR_STATUS=MANUAL_PENDIENTE"
   goto :summary
 )
 
 echo PR creado correctamente con gh.
+set "PR_STATUS=CREADO_CON_GH"
 
 set "REVIEWER="
 set /p REVIEWER=Usuario GitHub reviewer (opcional, ej: pilar-user): 
@@ -131,14 +118,6 @@ if defined REVIEWER (
 )
 
 goto :summary
-
-:maybe_pause
-if /i "!STEP_PAUSE!"=="Y" (
-  echo.
-  echo [PAUSA] %~1
-  pause
-)
-exit /b 0
 
 :get_repo_url
 set "REMOTE_URL="
@@ -175,6 +154,9 @@ echo ===== RESUMEN =====
 git status -sb
 echo.
 git log -1 --oneline
+echo.
+echo Estado PR: !PR_STATUS!
+if defined PR_URL echo Link PR: !PR_URL!
 echo ===================
 
 :end

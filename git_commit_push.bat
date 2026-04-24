@@ -14,8 +14,8 @@ git add .
 if errorlevel 1 goto :error
 
 echo.
-echo [3/6] Asegurando rama main...
-git branch -M main
+echo [3/6] Asegurando rama javi...
+git branch -M javi
 if errorlevel 1 goto :error
 
 echo.
@@ -33,8 +33,8 @@ git commit -m "%COMMIT_MSG%"
 if errorlevel 1 goto :error
 
 echo.
-echo [6/6] Enviando a origin/main...
-git push -u origin main
+echo [6/6] Enviando a origin/javi...
+git push -u origin javi
 if errorlevel 1 goto :error
 
 goto :summary

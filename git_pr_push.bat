@@ -149,6 +149,7 @@ echo Revisa los mensajes de arriba.
 goto :summary
 
 :summary
+set "LOG_FILE=%~dp0git_pr_push_last.log"
 echo.
 echo ===== RESUMEN =====
 git status -sb
@@ -157,9 +158,22 @@ git log -1 --oneline
 echo.
 echo Estado PR: !PR_STATUS!
 if defined PR_URL echo Link PR: !PR_URL!
+echo Log: !LOG_FILE!
 echo ===================
+
+(
+  echo ===== RESUMEN =====
+  git status -sb
+  echo.
+  git log -1 --oneline
+  echo.
+  echo Estado PR: !PR_STATUS!
+  if defined PR_URL echo Link PR: !PR_URL!
+  echo ===================
+) > "!LOG_FILE!" 2>&1
 
 :end
 echo.
-pause
+echo Presiona ENTER para cerrar esta ventana...
+set /p "_END_PROMPT=> "
 exit /b %EXIT_CODE%

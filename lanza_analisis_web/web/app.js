@@ -991,136 +991,183 @@ function saveHistoricoToStorage(monthKey, historico, isClosed = false) {
     closed: isClosed,
     lastUpdated: new Date().toISOString(),
   };
+  console.log(`Guardando en localStorage: ${monthKey}`);
+  console.log('Datos a guardar:', data);
+  if (data.reportRows) {
+    console.log(`ReportRows tiene ${data.reportRows.length} filas`);
+    console.log('Primeras 2 filas:', data.reportRows.slice(0, 2));
+  }
   localStorage.setItem(monthKey, JSON.stringify(data));
 }
 
 function saveHistorico() {
-  if (!state.comparisonRows.length || !state.lanzamientos.length) {
+  if (!state.lanzamientos.length || !state.comparisonRows.length) {
     els.saveHistoryStatus.textContent = 'Carga primero el plan y el archivo de estado para generar el histórico.';
     return;
   }
 
-  const months = Array.from(new Set(state.lanzamientos
-    .map((l) => formatMonthName(l.startDate || parseDateValue(l.rawStartDate)))
-    .filter(Boolean)));
-  const years = Array.from(new Set(state.lanzamientos
-    .map((l) => (l.startDate || parseDateValue(l.rawStartDate))?.getFullYear())
-    .filter(Boolean)));
-
-  if (!months.length || !years.length) {
-    els.saveHistoryStatus.textContent = 'No se pudo determinar el mes/año de los planes. Revisa las fechas de inicio.';
+  const reportRows = buildLanzamientoReport();
+  if (!reportRows.length) {
+    els.saveHistoryStatus.textContent = 'No hay datos en el reporte consolidado para guardar.';
     return;
   }
 
-  const ocs = state.comparisonRows.reduce((acc, row) => {
-    const pedido = Number(row.pedido) || 0;
-    const facturadaHoy = Number(row.facturada_hoy_580_610) || 0;
-    const totalFacturado = Number(row.total_facturado) || 0;
-    const cancelado = Number(row.depurado_980_984_999 || 0) + Number(row.depurado_cuota_527 || 0);
-    const ns15 = pedido > 0 ? (facturadaHoy / pedido) * 100 : 0;
-    const facturadoPct = pedido > 0 ? (totalFacturado / pedido) * 100 : 0;
-    const canceladoPct = pedido > 0 ? (cancelado / pedido) * 100 : 0;
-    const nsPct = pedido > 0 ? ((pedido - cancelado) / pedido) * 100 : 0;
+  const monthYearKeys = Array.from(new Set(reportRows.map((row) => {
+    const fecha = parseDateValue(row.fechaInicio);
+    if (!fecha) return null;
+    return getMonthKey(formatMonthName(fecha), fecha.getFullYear());
+  }).filter(Boolean)));
 
-    acc.push({
-      id: row.oc || 'SIN_OC',
-      negocio: row.negocio || 'Sin negocio',
-      incluido: true,
-      ns_15_dias: Number(ns15.toFixed(1)),
-      ns: Number(nsPct.toFixed(1)),
-      facturado: Number(facturadoPct.toFixed(1)),
-      cancelado: Number(canceladoPct.toFixed(1)),
-    });
-    return acc;
-  }, []);
-
-  const negocios = state.comparisonRows.reduce((acc, row) => {
-    const negocio = row.negocio || 'Sin negocio';
-    const pedido = Number(row.pedido) || 0;
-    const facturadaHoy = Number(row.facturada_hoy_580_610) || 0;
-    const totalFacturado = Number(row.total_facturado) || 0;
-    const cancelado = Number(row.depurado_980_984_999 || 0) + Number(row.depurado_cuota_527 || 0);
-
-    if (!acc[negocio]) {
-      acc[negocio] = { pedido: 0, facturadaHoy: 0, totalFacturado: 0, cancelado: 0 };
-    }
-    acc[negocio].pedido += pedido;
-    acc[negocio].facturadaHoy += facturadaHoy;
-    acc[negocio].totalFacturado += totalFacturado;
-    acc[negocio].cancelado += cancelado;
-    return acc;
-  }, {});
-
-  const negocioMetrics = {};
-  for (const [negocio, values] of Object.entries(negocios)) {
-    const pedido = values.pedido;
-    negocioMetrics[negocio] = {
-      ns_15_dias: pedido > 0 ? Number(((values.facturadaHoy / pedido) * 100).toFixed(1)) : 0,
-      ns: pedido > 0 ? Number((((pedido - values.cancelado) / pedido) * 100).toFixed(1)) : 0,
-      facturado: pedido > 0 ? Number(((values.totalFacturado / pedido) * 100).toFixed(1)) : 0,
-      cancelado: pedido > 0 ? Number(((values.cancelado / pedido) * 100).toFixed(1)) : 0,
-    };
+  if (!monthYearKeys.length) {
+    els.saveHistoryStatus.textContent = 'No se pudo determinar el mes/año de los lanzamientos. Revisa las fechas de inicio.';
+    return;
   }
 
-  // Guardar por mes
-  months.forEach((month, idx) => {
-    const year = years[idx] || years[0];
-    const monthKey = getMonthKey(month, year);
-    
-    // Cargar histórico existente para este mes
-    let existing = loadHistoricoFromStorage(monthKey) || {
+  monthYearKeys.forEach((monthKey) => {
+    const [month, yearStr] = monthKey.split('_');
+    const year = Number(yearStr);
+    const monthRows = reportRows.filter((row) => {
+      const fecha = parseDateValue(row.fechaInicio);
+      return fecha && formatMonthName(fecha) === month && fecha.getFullYear() === year;
+    });
+
+    const existing = loadHistoricoFromStorage(monthKey) || {
       mes: month,
       anio: year,
       negocios: {},
       ocs: [],
     };
 
-    // Actualizar OCs: reemplazar las que ya existen, agregar nuevas
-    const existingOcIds = new Set(existing.ocs.map(o => o.id));
-    const newOcs = ocs.filter(o => {
-      const isNew = !existingOcIds.has(o.id);
-      if (!isNew) {
-        // Reemplazar OC existente
-        const idx = existing.ocs.findIndex(eo => eo.id === o.id);
-        if (idx >= 0) {
-          existing.ocs[idx] = o;
-        }
+    const negocioMap = {};
+    const ocMap = new Map();
+
+    monthRows.forEach((row) => {
+      const negocio = row.negocio || 'Sin negocio';
+      const ocId = row.oc || 'SIN_OC';
+      const pedido = Number(row.cantidadPedida) || 0;
+      const facturado = Number(row.cantidadFacturada) || 0;
+      const ns15 = Number(row.ns15) || 0;
+      const cancelado = Number(row.cantidadCancelado) || 0;
+      const facturado15 = pedido > 0 ? (ns15 / 100) * pedido : 0;
+
+      if (!ocMap.has(ocId)) {
+        ocMap.set(ocId, {
+          negocio,
+          totalPedido: 0,
+          totalFacturado: 0,
+          totalFacturado15: 0,
+          totalCancelado: 0,
+        });
       }
-      return isNew;
+
+      const ocEntry = ocMap.get(ocId);
+      ocEntry.totalPedido += pedido;
+      ocEntry.totalFacturado += facturado;
+      ocEntry.totalFacturado15 += facturado15;
+      ocEntry.totalCancelado += cancelado;
     });
-    existing.ocs.push(...newOcs);
-    existing.ocs.sort((a, b) => sortLanzaKey(a.id, b.id));
 
-    // Actualizar métricas de negocio
-    Object.assign(existing.negocios, negocioMetrics);
+    const ocs = Array.from(ocMap.entries()).map(([ocId, ocData]) => {
+      const ns15Value = ocData.totalPedido > 0 ? (ocData.totalFacturado15 / ocData.totalPedido) * 100 : 0;
+      const nsValue = ocData.totalPedido > 0 ? (ocData.totalFacturado / ocData.totalPedido) * 100 : 0;
+      const facturadoValue = nsValue;
+      const canceladoValue = ocData.totalPedido > 0 ? (ocData.totalCancelado / ocData.totalPedido) * 100 : 0;
 
-    // Guardar (sin cerrar)
+      if (!negocioMap[ocData.negocio]) {
+        negocioMap[ocData.negocio] = {
+          ocCount: 0,
+          totalNs15: 0,
+          totalFacturado: 0,
+          totalCancelado: 0,
+        };
+      }
+      negocioMap[ocData.negocio].ocCount += 1;
+      negocioMap[ocData.negocio].totalNs15 += ns15Value;
+      negocioMap[ocData.negocio].totalFacturado += facturadoValue;
+      negocioMap[ocData.negocio].totalCancelado += canceladoValue;
+
+      return {
+        id: ocId,
+        negocio: ocData.negocio,
+        incluido: true,
+        ns_15_dias: Number(ns15Value.toFixed(1)),
+        ns: Number(nsValue.toFixed(1)),
+        facturado: Number(facturadoValue.toFixed(1)),
+        cancelado: Number(canceladoValue.toFixed(1)),
+      };
+    });
+
+    const negocios = {};
+    Object.entries(negocioMap).forEach(([negocio, values]) => {
+      negocios[negocio] = {
+        ns_15_dias: values.ocCount > 0 ? Number((values.totalNs15 / values.ocCount).toFixed(1)) : 0,
+        ns: values.ocCount > 0 ? Number((values.totalFacturado / values.ocCount).toFixed(1)) : 0,
+        facturado: values.ocCount > 0 ? Number((values.totalFacturado / values.ocCount).toFixed(1)) : 0,
+        cancelado: values.ocCount > 0 ? Number((values.totalCancelado / values.ocCount).toFixed(1)) : 0,
+      };
+    });
+
+    existing.negocios = negocios;
+    existing.ocs = ocs.sort((a, b) => sortLanzaKey(a.id, b.id));
+    existing.reportRows = monthRows;
+    console.log(`Guardando histórico ${monthKey} con ${monthRows.length} filas de reporte`);
+    console.log('Primeras filas de reporte:', monthRows.slice(0, 2));
     saveHistoricoToStorage(monthKey, existing, false);
 
-    state.currentMonth = month;
-    state.currentYear = year;
+    // Exportar a Excel
+    exportHistoricoToExcel(monthKey, existing, reportRows);
   });
 
-  els.saveHistoryStatus.textContent = `Histórico guardado para ${months.join(', ')}. Puede agregar más planes o hacer clic en "Cerrar mes".`;
+  // Setear el mes actual para poder cerrarlo después
+  if (monthYearKeys.length > 0) {
+    const lastMonthKey = monthYearKeys[monthYearKeys.length - 1];
+    const parts = lastMonthKey.split('_');
+    if (parts.length >= 2) {
+      state.currentMonth = parts[0];
+      state.currentYear = Number(parts[1]);
+    }
+  }
+
+  els.saveHistoryStatus.textContent = `Histórico guardado para ${monthYearKeys.map((key) => key.replace('_', ' ')).join(', ')}. Puede agregar más planes o hacer clic en "Cerrar mes".`;
   els.closeMonthBtn.disabled = false;
 }
 
 function closeMonth() {
-  if (!state.currentMonth || !state.currentYear) {
-    els.saveHistoryStatus.textContent = 'No hay mes cargado para cerrar.';
+  // Obtener meses desde las fechas de inicio de los lanzamientos cargados
+  if (!state.lanzamientos.length) {
+    els.saveHistoryStatus.textContent = 'Carga primero los lanzamientos para cerrar el mes.';
     return;
   }
 
-  const monthKey = getMonthKey(state.currentMonth, state.currentYear);
-  const historico = loadHistoricoFromStorage(monthKey);
-  
-  if (!historico) {
-    els.saveHistoryStatus.textContent = 'Guarda el histórico antes de cerrar el mes.';
+  // Obtener meses únicos de los lanzamientos cargados
+  const monthYearKeys = Array.from(new Set(state.lanzamientos.map((lanzamiento) => {
+    const fecha = lanzamiento.startDate;
+    if (!fecha) return null;
+    const monthName = formatMonthName(fecha);
+    const year = fecha.getFullYear();
+    return getMonthKey(monthName, year);
+  }).filter(Boolean)));
+
+  if (!monthYearKeys.length) {
+    els.saveHistoryStatus.textContent = 'No se pudo determinar el mes/año de los lanzamientos para cerrar.';
     return;
   }
 
-  saveHistoricoToStorage(monthKey, historico, true);
-  els.saveHistoryStatus.textContent = `${state.currentMonth.charAt(0).toUpperCase() + state.currentMonth.slice(1)} ${state.currentYear} cerrado. No se puede modificar.`;
+  // Cerrar todos los meses encontrados
+  monthYearKeys.forEach((monthKey) => {
+    const historico = loadHistoricoFromStorage(monthKey);
+    
+    if (!historico) {
+      els.saveHistoryStatus.textContent = `Guarda el histórico antes de cerrar ${monthKey.replace('_', ' ')}.`;
+      return;
+    }
+
+    saveHistoricoToStorage(monthKey, historico, true);
+    console.log(`Mes cerrado: ${monthKey}`);
+  });
+
+  const closedMonths = monthYearKeys.map(k => k.replace('_', ' ')).join(', ');
+  els.saveHistoryStatus.textContent = `${closedMonths} cerrado(s). No se pueden modificar.`;
   els.closeMonthBtn.disabled = true;
 }
 
@@ -2061,4 +2108,16 @@ function formatDate(date) {
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const y = date.getFullYear();
   return `${d}/${m}/${y}`;
+}
+
+function exportHistoricoToExcel(monthKey, historico, reportRows) {
+  const workbook = XLSX.utils.book_new();
+
+  // Sheet única: Lanzamiento Consolidado (todo lo que importa)
+  const consolidadoSheet = XLSX.utils.json_to_sheet(reportRows);
+  XLSX.utils.book_append_sheet(workbook, consolidadoSheet, 'Lanzamiento_Consolidado');
+
+  // Descargar el archivo
+  const fileName = `historico_${monthKey}.xlsx`;
+  XLSX.writeFile(workbook, fileName);
 }

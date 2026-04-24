@@ -19,14 +19,15 @@
       <h1>Histórico LANZA</h1>
       <p>Este visor muestra históricos ya generados. Para crear o actualizar el histórico usa la opción de "Guardar histórico" en la página principal.</p>
       <p id="historicoStatus" class="hint"></p>
+      <button id="clearHistoricosBtn" style="margin-top: 10px; padding: 5px 10px;">Limpiar Históricos Guardados</button>
     </header>
 
     <section class="panel">
       <h2>Por Negocio</h2>
       <div class="filters-grid">
         <label class="field">
-          <span>Mes(es)</span>
-          <select id="mesSelectNegocio" multiple>
+          <span>Mes</span>
+          <select id="mesSelectNegocio">
             <option disabled selected>Cargando...</option>
           </select>
         </label>
@@ -44,13 +45,18 @@
       <h2>Por OC</h2>
       <div class="filters-grid">
         <label class="field">
-          <span>Mes(es)</span>
-          <select id="mesSelectOC" multiple>
+          <span>Mes</span>
+          <select id="mesSelectOC">
             <option disabled selected>Cargando...</option>
           </select>
         </label>
+        <label class="field">
+          <span>OC</span>
+          <select id="ocSelect">
+            <option value="">Todos</option>
+          </select>
+        </label>
       </div>
-      <div id="ocList" class="oc-list"></div>
       <div id="ocMetrics" class="cards"></div>
     </section>
 
@@ -72,27 +78,13 @@
             const monthYearKey = key.replace('historico_', '');
             historicos[monthYearKey] = data;
             loaded++;
+            console.log('Cargado desde localStorage:', monthYearKey, data);
           } catch (error) {
             console.warn('Omitiendo histórico inválido:', key, error);
           }
         }
       }
 
-      if (!loaded) {
-        const monthNames = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-        for (const month of monthNames) {
-          try {
-            const response = await fetch(`historicos/historico_${month}.json`);
-            if (!response.ok) continue;
-            const data = await response.json();
-            historicos[month] = data;
-            loaded++;
-          } catch (error) {
-            console.warn(`No se pudo cargar historico_${month}.json`, error);
-          }
-        }
-      }
-      
       const status = document.getElementById('historicoStatus');
       if (!loaded) {
         status.textContent = 'No hay históricos guardados aún. Carga planes en la página principal y guarda un histórico.';
@@ -105,7 +97,7 @@
 
       status.textContent = `Históricos cargados: ${loaded} mes(es).`;
       renderNegocios();
-      renderOCs();
+      renderOCsSection();
     }
 
     function renderNegocios() {
@@ -118,23 +110,31 @@
         const option = document.createElement('option');
         option.value = key;
         option.textContent = key.replace(/_/g, ' ');
-        option.selected = true;
         mesSelectNegocio.appendChild(option);
       });
+      // Seleccionar primer mes por defecto
+      if (mesSelectNegocio.options.length > 0) {
+        mesSelectNegocio.selectedIndex = 0;
+      }
 
       // Poblar negocios
       const negocios = new Set();
       Object.values(historicos).forEach(h => {
-        Object.keys(h.negocios || {}).forEach(n => negocios.add(n));
+        if (h.reportRows && Array.isArray(h.reportRows)) {
+          h.reportRows.forEach(row => {
+            if (row.negocio) negocios.add(row.negocio);
+          });
+        }
       });
-      negocioSelect.innerHTML = '<option value="">Todos</option>' + Array.from(negocios).map(n => `<option value="${n}">${n}</option>`).join('');
+      negocioSelect.innerHTML = '<option value="">Todos</option>' + Array.from(negocios).sort().map(n => `<option value="${n}">${n}</option>`).join('');
       
       console.log('Históricos cargados:', historicos);
       console.log('Negocios detectados:', Array.from(negocios));
       updateNegocioMetrics();
     }
 
-    function renderOCs() {
+    function renderOCsSection() {
+      const ocSelect = document.getElementById('ocSelect');
       const mesSelectOC = document.getElementById('mesSelectOC');
       
       // Poblar meses
@@ -143,83 +143,93 @@
         const option = document.createElement('option');
         option.value = key;
         option.textContent = key.replace(/_/g, ' ');
-        option.selected = true;
         mesSelectOC.appendChild(option);
       });
+      // Seleccionar primer mes por defecto
+      if (mesSelectOC.options.length > 0) {
+        mesSelectOC.selectedIndex = 0;
+      }
 
-      updateOCList();
-    }
-
-    function updateOCList() {
-      const mesSelectOC = document.getElementById('mesSelectOC');
-      const selectedMeses = Array.from(mesSelectOC.selectedOptions).map(o => o.value);
-      const ocList = document.getElementById('ocList');
-      const allOCs = [];
-      
-      selectedMeses.forEach(mes => {
-        if (historicos[mes]) {
-          allOCs.push(...(historicos[mes].ocs || []));
+      // Poblar OCs
+      const allOCs = new Set();
+      Object.values(historicos).forEach(h => {
+        if (h.reportRows && Array.isArray(h.reportRows)) {
+          h.reportRows.forEach(row => {
+            if (row.oc) allOCs.add(row.oc);
+          });
         }
       });
       
-      allOCs.sort((a, b) => {
+      const sortedOCs = Array.from(allOCs).sort((a, b) => {
         const regex = /lanza_(\d+)/i;
-        const aMatch = a.id.match(regex);
-        const bMatch = b.id.match(regex);
+        const aMatch = a.match(regex);
+        const bMatch = b.match(regex);
         if (aMatch && bMatch) {
           const aNum = Number(aMatch[1]);
           const bNum = Number(bMatch[1]);
           if (aNum !== bNum) return aNum - bNum;
         }
-        return a.id.localeCompare(b.id);
+        return a.localeCompare(b);
+      });
+      
+      ocSelect.innerHTML = '<option value="">Todos</option>' + sortedOCs.map(oc => `<option value="${oc}">${oc}</option>`).join('');
+      updateOCMetrics();
+    }
+
+    function aggregateFromReportRows(reportRows, selectedNegocio = null) {
+      const metrics = { ns_15_dias: 0, facturado: 0, cancelado: 0 };
+      let count = 0;
+
+      reportRows.forEach(row => {
+        if (selectedNegocio && row.negocio !== selectedNegocio) return;
+        const ns15 = Number(row.ns15) || 0;
+        const facturado = Number(row.pctAvance) || 0;
+        const cancelado = Number(row.pctCancelado) || 0;
+        metrics.ns_15_dias += ns15;
+        metrics.facturado += facturado;
+        metrics.cancelado += cancelado;
+        count++;
       });
 
-      if (!allOCs.length) {
-        ocList.innerHTML = '<p class="hint">No hay OCs disponibles en los meses seleccionados.</p>';
-      } else {
-        ocList.innerHTML = allOCs.map(oc => `
-          <label class="oc-item">
-            <input type="checkbox" value="${oc.id}" ${oc.incluido ? 'checked' : ''} onchange="updateOCMetrics()">
-            ${oc.id} (${oc.negocio})
-          </label>
-        `).join('');
-      }
-      updateOCMetrics();
+      if (count === 0) return null;
+      return {
+        ns_15_dias: metrics.ns_15_dias / count,
+        ns: metrics.facturado / count,
+        facturado: metrics.facturado / count,
+        cancelado: metrics.cancelado / count,
+      };
     }
 
     function updateNegocioMetrics() {
       const mesSelect = document.getElementById('mesSelectNegocio');
       const negocioSelect = document.getElementById('negocioSelect');
-      const selectedMeses = Array.from(mesSelect.selectedOptions).map(o => o.value);
+      const selectedMes = mesSelect.value;
       const selectedNegocio = negocioSelect.value;
-      const metrics = { ns_15_dias: 0, ns: 0, facturado: 0, cancelado: 0 };
+      const metrics = { ns_15_dias: 0, ns: 0, cancelado: 0 };
       let count = 0;
 
-      console.log('updateNegocioMetrics:', { selectedMeses, selectedNegocio, historicoKeys: Object.keys(historicos) });
+      const historico = historicos[selectedMes];
+      if (!historico) {
+        renderMetrics('negocioMetrics', metrics);
+        return;
+      }
 
-      selectedMeses.forEach(mes => {
-        if (historicos[mes] && historicos[mes].negocios) {
-          console.log(`  Mes ${mes}:`, historicos[mes].negocios);
-          if (selectedNegocio && historicos[mes].negocios[selectedNegocio]) {
-            const n = historicos[mes].negocios[selectedNegocio];
-            metrics.ns_15_dias += n.ns_15_dias;
-            metrics.ns += n.ns;
-            metrics.facturado += n.facturado;
-            metrics.cancelado += n.cancelado;
-            count++;
-          } else if (!selectedNegocio) {
-            Object.values(historicos[mes].negocios).forEach(n => {
-              metrics.ns_15_dias += n.ns_15_dias;
-              metrics.ns += n.ns;
-              metrics.facturado += n.facturado;
-              metrics.cancelado += n.cancelado;
-              count++;
-            });
-          }
-        }
-      });
+      if (historico.reportRows && Array.isArray(historico.reportRows)) {
+        const filtered = selectedNegocio 
+          ? historico.reportRows.filter(row => row.negocio === selectedNegocio)
+          : historico.reportRows;
+        
+        filtered.forEach(row => {
+          const ns15 = Number(row.ns15) || 0;
+          const nsValue = Number(row.nivelServicio) || 0;
+          const cancelado = Number(row.pctCancelado) || 0;
+          metrics.ns_15_dias += ns15;
+          metrics.ns += nsValue;
+          metrics.cancelado += cancelado;
+          count++;
+        });
+      }
 
-      console.log('Métricas calculadas:', { metrics, count });
       if (count > 0) {
         Object.keys(metrics).forEach(k => metrics[k] /= count);
       }
@@ -227,22 +237,34 @@
     }
 
     function updateOCMetrics() {
-      const checkboxes = document.querySelectorAll('#ocList input:checked');
-      const selectedOCs = Array.from(checkboxes).map(cb => cb.value);
-      const metrics = { ns_15_dias: 0, ns: 0, facturado: 0, cancelado: 0 };
+      const mesSelectOC = document.getElementById('mesSelectOC');
+      const ocSelect = document.getElementById('ocSelect');
+      const selectedMes = mesSelectOC.value;
+      const selectedOC = ocSelect.value;
+      const metrics = { ns_15_dias: 0, ns: 0, cancelado: 0 };
       let count = 0;
 
-      Object.values(historicos).forEach(h => {
-        (h.ocs || []).forEach(oc => {
-          if (selectedOCs.includes(oc.id)) {
-            metrics.ns_15_dias += oc.ns_15_dias;
-            metrics.ns += oc.ns;
-            metrics.facturado += oc.facturado;
-            metrics.cancelado += oc.cancelado;
-            count++;
-          }
+      const historico = historicos[selectedMes];
+      if (!historico) {
+        renderMetrics('ocMetrics', metrics);
+        return;
+      }
+
+      if (historico.reportRows && Array.isArray(historico.reportRows)) {
+        const filtered = selectedOC 
+          ? historico.reportRows.filter(row => row.oc === selectedOC)
+          : historico.reportRows;
+        
+        filtered.forEach(row => {
+          const ns15 = Number(row.ns15) || 0;
+          const nsValue = Number(row.nivelServicio) || 0;
+          const cancelado = Number(row.pctCancelado) || 0;
+          metrics.ns_15_dias += ns15;
+          metrics.ns += nsValue;
+          metrics.cancelado += cancelado;
+          count++;
         });
-      });
+      }
 
       if (count > 0) {
         Object.keys(metrics).forEach(k => metrics[k] /= count);
@@ -254,10 +276,9 @@
       const container = document.getElementById(containerId);
       container.innerHTML = '';
       const labels = {
-        ns_15_dias: 'NS 15 Días',
-        ns: 'NS',
-        facturado: 'Facturado',
-        cancelado: 'Cancelado'
+        ns_15_dias: 'NS 15 Días (Promedio)',
+        ns: 'NS (Promedio)',
+        cancelado: 'Cancelado (Promedio)'
       };
       Object.keys(metrics).forEach(key => {
         const div = document.createElement('div');
@@ -305,8 +326,20 @@
 
     document.getElementById('mesSelectNegocio').addEventListener('change', updateNegocioMetrics);
     document.getElementById('negocioSelect').addEventListener('change', updateNegocioMetrics);
-    document.getElementById('mesSelectOC').addEventListener('change', updateOCList);
+    document.getElementById('mesSelectOC').addEventListener('change', updateOCMetrics);
+    document.getElementById('ocSelect').addEventListener('change', updateOCMetrics);
+
+    document.getElementById('clearHistoricosBtn').addEventListener('click', () => {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const key = localStorage.key(i);
+        if (key.startsWith('historico_')) {
+          localStorage.removeItem(key);
+        }
+      }
+      alert('Históricos guardados eliminados. Recarga la página para cargar desde archivos.');
+    });
 
     loadHistoricos();
+  </script>
 </body>
 </html>

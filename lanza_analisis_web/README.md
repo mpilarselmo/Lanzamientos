@@ -6,6 +6,7 @@ Proyecto web aislado 100% cliente (HTML/CSS/JS), sin Python.
 
 - `web/`: frontend HTML/CSS/JS
 - `levantar_web.bat`: abre la web en el navegador
+- `limpiar_base.bat`: limpia los históricos guardados en localStorage
 
 ## Levantar la web
 

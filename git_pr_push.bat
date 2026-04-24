@@ -1,6 +1,11 @@
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 
+if /i "%~1" neq "--run" (
+  start "PR Push" cmd /k ""%~f0" --run"
+  exit /b
+)
+
 cd /d "%~dp0"
 set "EXIT_CODE=0"
 set "PR_URL="

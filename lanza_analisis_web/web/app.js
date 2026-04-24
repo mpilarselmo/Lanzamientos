@@ -968,6 +968,14 @@ function getMonthKey(monthName, year) {
   return `historico_${monthName}_${year}`;
 }
 
+function parseMonthYearFromKey(monthKey) {
+  const match = String(monthKey || "").match(/^historico_(.+)_(\d{4})$/);
+  if (!match) {
+    return null;
+  }
+  return { month: match[1], year: Number(match[2]) };
+}
+
 function getMonthKeyFromDate(date) {
   if (!date) return null;
   const monthName = formatMonthName(date);
@@ -1000,6 +1008,9 @@ function saveHistoricoToStorage(monthKey, historico, isClosed = false) {
   localStorage.setItem(monthKey, JSON.stringify(data));
 }
 
+// Mantener disponible para futuro, pero desactivar descarga automática por ahora.
+const ENABLE_HISTORICO_AUTO_EXPORT = false;
+
 function saveHistorico() {
   if (!state.lanzamientos.length || !state.comparisonRows.length) {
     els.saveHistoryStatus.textContent = 'Carga primero el plan y el archivo de estado para generar el histórico.';
@@ -1024,8 +1035,12 @@ function saveHistorico() {
   }
 
   monthYearKeys.forEach((monthKey) => {
-    const [month, yearStr] = monthKey.split('_');
-    const year = Number(yearStr);
+    const parsed = parseMonthYearFromKey(monthKey);
+    if (!parsed) {
+      return;
+    }
+
+    const { month, year } = parsed;
     const monthRows = reportRows.filter((row) => {
       const fecha = parseDateValue(row.fechaInicio);
       return fecha && formatMonthName(fecha) === month && fecha.getFullYear() === year;
@@ -1114,8 +1129,10 @@ function saveHistorico() {
     console.log('Primeras filas de reporte:', monthRows.slice(0, 2));
     saveHistoricoToStorage(monthKey, existing, false);
 
-    // Exportar a Excel
-    exportHistoricoToExcel(monthKey, existing, reportRows);
+    // Exportar a Excel (desactivado por configuración)
+    if (ENABLE_HISTORICO_AUTO_EXPORT) {
+      exportHistoricoToExcel(monthKey, existing, reportRows);
+    }
   });
 
   // Setear el mes actual para poder cerrarlo después
@@ -2118,6 +2135,6 @@ function exportHistoricoToExcel(monthKey, historico, reportRows) {
   XLSX.utils.book_append_sheet(workbook, consolidadoSheet, 'Lanzamiento_Consolidado');
 
   // Descargar el archivo
-  const fileName = `historico_${monthKey}.xlsx`;
+  const fileName = `${monthKey}.xlsx`;
   XLSX.writeFile(workbook, fileName);
 }

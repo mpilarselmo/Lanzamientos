@@ -27,9 +27,10 @@
       <div class="filters-grid">
         <label class="field">
           <span>Mes</span>
-          <select id="mesSelectNegocio">
+          <select id="mesSelectNegocio" multiple size="5">
             <option disabled selected>Cargando...</option>
           </select>
+          <small class="hint">Podés seleccionar varios meses con Ctrl/Cmd + click.</small>
         </label>
         <label class="field">
           <span>Negocio</span>
@@ -64,6 +65,140 @@
 
   <script>
     let historicos = {};
+    const chartInstances = new Map();
+
+    function toNumber(value) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : 0;
+    }
+
+    function buildMonthLabel(monthKey) {
+      const [month, year] = String(monthKey || '').split('_');
+      return month && year ? `${month} ${year}` : monthKey;
+    }
+
+    function getReportRows(historico) {
+      return Array.isArray(historico?.reportRows) ? historico.reportRows : [];
+    }
+
+    function getSelectedMonths(selectElementId) {
+      const select = document.getElementById(selectElementId);
+      const values = Array.from(select.selectedOptions || []).map((option) => option.value).filter(Boolean);
+
+      // En select simple, o cuando no hay selección explícita, usa el valor actual.
+      if (values.length) {
+        return values;
+      }
+
+      return select.value ? [select.value] : [];
+    }
+
+    function averageMetrics(metricsList) {
+      if (!metricsList.length) {
+        return { ns_15_dias: 0, ns: 0, cancelado: 0 };
+      }
+
+      const acc = metricsList.reduce((sum, current) => {
+        sum.ns_15_dias += toNumber(current.ns_15_dias);
+        sum.ns += toNumber(current.ns);
+        sum.cancelado += toNumber(current.cancelado);
+        return sum;
+      }, { ns_15_dias: 0, ns: 0, cancelado: 0 });
+
+      return {
+        ns_15_dias: acc.ns_15_dias / metricsList.length,
+        ns: acc.ns / metricsList.length,
+        cancelado: acc.cancelado / metricsList.length,
+      };
+    }
+
+    function metricsFromReportRows(rows) {
+      if (!rows.length) {
+        return { ns_15_dias: 0, ns: 0, cancelado: 0 };
+      }
+
+      const totals = rows.reduce((sum, row) => {
+        sum.ns_15_dias += toNumber(row.ns15 ?? row.ns_15_dias);
+        sum.ns += toNumber(row.nivelServicio ?? row.ns);
+        sum.cancelado += toNumber(row.pctCancelado ?? row.cancelado);
+        return sum;
+      }, { ns_15_dias: 0, ns: 0, cancelado: 0 });
+
+      return {
+        ns_15_dias: totals.ns_15_dias / rows.length,
+        ns: totals.ns / rows.length,
+        cancelado: totals.cancelado / rows.length,
+      };
+    }
+
+    function getNegocios(historico) {
+      const rows = getReportRows(historico);
+      if (rows.length) {
+        return Array.from(new Set(rows.map((row) => row.negocio).filter(Boolean))).sort();
+      }
+
+      const negocioEntries = historico?.negocios && typeof historico.negocios === 'object'
+        ? Object.keys(historico.negocios)
+        : [];
+      return negocioEntries.sort();
+    }
+
+    function getOCs(historico) {
+      const rows = getReportRows(historico);
+      let ocValues = [];
+
+      if (rows.length) {
+        ocValues = Array.from(new Set(rows.map((row) => row.oc).filter(Boolean)));
+      } else if (Array.isArray(historico?.ocs)) {
+        ocValues = historico.ocs.map((oc) => oc.id).filter(Boolean);
+      }
+
+      return ocValues.sort((a, b) => {
+        const regex = /lanza_(\d+)/i;
+        const aMatch = String(a).match(regex);
+        const bMatch = String(b).match(regex);
+        if (aMatch && bMatch) {
+          const aNum = Number(aMatch[1]);
+          const bNum = Number(bMatch[1]);
+          if (aNum !== bNum) return aNum - bNum;
+        }
+        return String(a).localeCompare(String(b));
+      });
+    }
+
+    function populateNegocioOptionsForSelectedMonth() {
+      const negocioSelect = document.getElementById('negocioSelect');
+      const mesSelectNegocio = document.getElementById('mesSelectNegocio');
+      const previousValue = negocioSelect.value;
+      const selectedMonths = getSelectedMonths('mesSelectNegocio');
+      const negociosSet = new Set();
+
+      selectedMonths.forEach((monthKey) => {
+        const selectedHistorico = historicos[monthKey];
+        getNegocios(selectedHistorico).forEach((negocio) => negociosSet.add(negocio));
+      });
+
+      const negocios = Array.from(negociosSet).sort();
+
+      negocioSelect.innerHTML = '<option value="">Todos</option>' + negocios.map(n => `<option value="${n}">${n}</option>`).join('');
+      if (previousValue && negocios.includes(previousValue)) {
+        negocioSelect.value = previousValue;
+      }
+    }
+
+    function populateOCOptionsForSelectedMonth() {
+      const ocSelect = document.getElementById('ocSelect');
+      const mesSelectOC = document.getElementById('mesSelectOC');
+      const previousValue = ocSelect.value;
+      const selectedMes = mesSelectOC.value;
+      const selectedHistorico = historicos[selectedMes];
+      const sortedOCs = getOCs(selectedHistorico);
+
+      ocSelect.innerHTML = '<option value="">Todos</option>' + sortedOCs.map(oc => `<option value="${oc}">${oc}</option>`).join('');
+      if (previousValue && sortedOCs.includes(previousValue)) {
+        ocSelect.value = previousValue;
+      }
+    }
 
     async function loadHistoricos() {
       // Cargar desde localStorage
@@ -91,7 +226,9 @@
         document.getElementById('mesSelectNegocio').innerHTML = '<option disabled>No hay meses disponibles</option>';
         document.getElementById('negocioSelect').innerHTML = '<option value="">Todos</option>';
         document.getElementById('mesSelectOC').innerHTML = '<option disabled>No hay meses disponibles</option>';
-        document.getElementById('ocList').innerHTML = '<p class="hint">No hay OCs disponibles.</p>';
+        document.getElementById('ocSelect').innerHTML = '<option value="">Todos</option>';
+        renderMetrics('negocioMetrics', { ns_15_dias: 0, ns: 0, cancelado: 0 });
+        renderMetrics('ocMetrics', { ns_15_dias: 0, ns: 0, cancelado: 0 });
         return;
       }
 
@@ -106,30 +243,22 @@
       
       // Poblar meses
       mesSelectNegocio.innerHTML = '';
-      Object.keys(historicos).forEach(key => {
+      Object.keys(historicos).sort().forEach(key => {
         const option = document.createElement('option');
         option.value = key;
-        option.textContent = key.replace(/_/g, ' ');
+        option.textContent = buildMonthLabel(key);
         mesSelectNegocio.appendChild(option);
       });
       // Seleccionar primer mes por defecto
       if (mesSelectNegocio.options.length > 0) {
-        mesSelectNegocio.selectedIndex = 0;
+        mesSelectNegocio.options[0].selected = true;
       }
 
       // Poblar negocios
-      const negocios = new Set();
-      Object.values(historicos).forEach(h => {
-        if (h.reportRows && Array.isArray(h.reportRows)) {
-          h.reportRows.forEach(row => {
-            if (row.negocio) negocios.add(row.negocio);
-          });
-        }
-      });
-      negocioSelect.innerHTML = '<option value="">Todos</option>' + Array.from(negocios).sort().map(n => `<option value="${n}">${n}</option>`).join('');
+      populateNegocioOptionsForSelectedMonth();
       
       console.log('Históricos cargados:', historicos);
-      console.log('Negocios detectados:', Array.from(negocios));
+      console.log('Negocios detectados:', Array.from(document.getElementById('negocioSelect').options).map((o) => o.value).filter(Boolean));
       updateNegocioMetrics();
     }
 
@@ -139,10 +268,10 @@
       
       // Poblar meses
       mesSelectOC.innerHTML = '';
-      Object.keys(historicos).forEach(key => {
+      Object.keys(historicos).sort().forEach(key => {
         const option = document.createElement('option');
         option.value = key;
-        option.textContent = key.replace(/_/g, ' ');
+        option.textContent = buildMonthLabel(key);
         mesSelectOC.appendChild(option);
       });
       // Seleccionar primer mes por defecto
@@ -151,88 +280,58 @@
       }
 
       // Poblar OCs
-      const allOCs = new Set();
-      Object.values(historicos).forEach(h => {
-        if (h.reportRows && Array.isArray(h.reportRows)) {
-          h.reportRows.forEach(row => {
-            if (row.oc) allOCs.add(row.oc);
-          });
-        }
-      });
-      
-      const sortedOCs = Array.from(allOCs).sort((a, b) => {
-        const regex = /lanza_(\d+)/i;
-        const aMatch = a.match(regex);
-        const bMatch = b.match(regex);
-        if (aMatch && bMatch) {
-          const aNum = Number(aMatch[1]);
-          const bNum = Number(bMatch[1]);
-          if (aNum !== bNum) return aNum - bNum;
-        }
-        return a.localeCompare(b);
-      });
-      
-      ocSelect.innerHTML = '<option value="">Todos</option>' + sortedOCs.map(oc => `<option value="${oc}">${oc}</option>`).join('');
+      populateOCOptionsForSelectedMonth();
       updateOCMetrics();
     }
 
-    function aggregateFromReportRows(reportRows, selectedNegocio = null) {
-      const metrics = { ns_15_dias: 0, facturado: 0, cancelado: 0 };
-      let count = 0;
-
-      reportRows.forEach(row => {
-        if (selectedNegocio && row.negocio !== selectedNegocio) return;
-        const ns15 = Number(row.ns15) || 0;
-        const facturado = Number(row.pctAvance) || 0;
-        const cancelado = Number(row.pctCancelado) || 0;
-        metrics.ns_15_dias += ns15;
-        metrics.facturado += facturado;
-        metrics.cancelado += cancelado;
-        count++;
-      });
-
-      if (count === 0) return null;
-      return {
-        ns_15_dias: metrics.ns_15_dias / count,
-        ns: metrics.facturado / count,
-        facturado: metrics.facturado / count,
-        cancelado: metrics.cancelado / count,
-      };
-    }
-
     function updateNegocioMetrics() {
-      const mesSelect = document.getElementById('mesSelectNegocio');
       const negocioSelect = document.getElementById('negocioSelect');
-      const selectedMes = mesSelect.value;
+      const selectedMonths = getSelectedMonths('mesSelectNegocio');
       const selectedNegocio = negocioSelect.value;
-      const metrics = { ns_15_dias: 0, ns: 0, cancelado: 0 };
-      let count = 0;
 
-      const historico = historicos[selectedMes];
-      if (!historico) {
-        renderMetrics('negocioMetrics', metrics);
+      if (!selectedMonths.length) {
+        renderMetrics('negocioMetrics', { ns_15_dias: 0, ns: 0, cancelado: 0 });
         return;
       }
 
-      if (historico.reportRows && Array.isArray(historico.reportRows)) {
-        const filtered = selectedNegocio 
-          ? historico.reportRows.filter(row => row.negocio === selectedNegocio)
-          : historico.reportRows;
-        
-        filtered.forEach(row => {
-          const ns15 = Number(row.ns15) || 0;
-          const nsValue = Number(row.nivelServicio) || 0;
-          const cancelado = Number(row.pctCancelado) || 0;
-          metrics.ns_15_dias += ns15;
-          metrics.ns += nsValue;
-          metrics.cancelado += cancelado;
-          count++;
-        });
-      }
+      const reportRowsBucket = [];
+      const fallbackMetricsBucket = [];
 
-      if (count > 0) {
-        Object.keys(metrics).forEach(k => metrics[k] /= count);
-      }
+      selectedMonths.forEach((monthKey) => {
+        const historico = historicos[monthKey];
+        if (!historico) {
+          return;
+        }
+
+        const rows = getReportRows(historico);
+        if (rows.length) {
+          const filteredRows = selectedNegocio ? rows.filter((row) => row.negocio === selectedNegocio) : rows;
+          reportRowsBucket.push(...filteredRows);
+          return;
+        }
+
+        const negocioEntries = historico.negocios && typeof historico.negocios === 'object' ? historico.negocios : {};
+        if (selectedNegocio) {
+          fallbackMetricsBucket.push({
+            ns_15_dias: toNumber(negocioEntries[selectedNegocio]?.ns_15_dias),
+            ns: toNumber(negocioEntries[selectedNegocio]?.ns),
+            cancelado: toNumber(negocioEntries[selectedNegocio]?.cancelado),
+          });
+        } else {
+          Object.values(negocioEntries).forEach((item) => {
+            fallbackMetricsBucket.push({
+              ns_15_dias: item?.ns_15_dias,
+              ns: item?.ns,
+              cancelado: item?.cancelado,
+            });
+          });
+        }
+      });
+
+      const metrics = reportRowsBucket.length
+        ? metricsFromReportRows(reportRowsBucket)
+        : averageMetrics(fallbackMetricsBucket);
+
       renderMetrics('negocioMetrics', metrics);
     }
 
@@ -241,34 +340,30 @@
       const ocSelect = document.getElementById('ocSelect');
       const selectedMes = mesSelectOC.value;
       const selectedOC = ocSelect.value;
-      const metrics = { ns_15_dias: 0, ns: 0, cancelado: 0 };
-      let count = 0;
 
       const historico = historicos[selectedMes];
       if (!historico) {
-        renderMetrics('ocMetrics', metrics);
+        renderMetrics('ocMetrics', { ns_15_dias: 0, ns: 0, cancelado: 0 });
         return;
       }
 
-      if (historico.reportRows && Array.isArray(historico.reportRows)) {
-        const filtered = selectedOC 
-          ? historico.reportRows.filter(row => row.oc === selectedOC)
-          : historico.reportRows;
-        
-        filtered.forEach(row => {
-          const ns15 = Number(row.ns15) || 0;
-          const nsValue = Number(row.nivelServicio) || 0;
-          const cancelado = Number(row.pctCancelado) || 0;
-          metrics.ns_15_dias += ns15;
-          metrics.ns += nsValue;
-          metrics.cancelado += cancelado;
-          count++;
-        });
+      const rows = getReportRows(historico);
+      let metrics;
+
+      if (rows.length) {
+        const filteredRows = selectedOC ? rows.filter((row) => row.oc === selectedOC) : rows;
+        metrics = metricsFromReportRows(filteredRows);
+      } else {
+        const ocList = Array.isArray(historico.ocs) ? historico.ocs : [];
+        const filteredOcs = selectedOC ? ocList.filter((item) => item.id === selectedOC) : ocList;
+        const metricsList = filteredOcs.map((item) => ({
+          ns_15_dias: item.ns_15_dias,
+          ns: item.ns,
+          cancelado: item.cancelado,
+        }));
+        metrics = averageMetrics(metricsList);
       }
 
-      if (count > 0) {
-        Object.keys(metrics).forEach(k => metrics[k] /= count);
-      }
       renderMetrics('ocMetrics', metrics);
     }
 
@@ -291,12 +386,18 @@
 
     function renderGauge(canvasId, value) {
       const ctx = document.getElementById(canvasId).getContext('2d');
-      new Chart(ctx, {
+      const safeValue = Math.max(0, Math.min(100, toNumber(value)));
+
+      if (chartInstances.has(canvasId)) {
+        chartInstances.get(canvasId).destroy();
+      }
+
+      const chart = new Chart(ctx, {
         type: 'doughnut',
         data: {
           datasets: [{
-            data: [value, 100 - value],
-            backgroundColor: [value >= 90 ? 'green' : value >= 70 ? 'yellow' : 'red', '#e0e0e0'],
+            data: [safeValue, 100 - safeValue],
+            backgroundColor: [safeValue >= 90 ? 'green' : safeValue >= 70 ? 'yellow' : 'red', '#e0e0e0'],
             borderWidth: 0
           }]
         },
@@ -317,16 +418,24 @@
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             ctx.fillStyle = 'black';
-            ctx.fillText(`${value.toFixed(1)}%`, left + width / 2, top + height / 2);
+            ctx.fillText(`${safeValue.toFixed(1)}%`, left + width / 2, top + height / 2);
             ctx.restore();
           }
         }]
       });
+
+      chartInstances.set(canvasId, chart);
     }
 
-    document.getElementById('mesSelectNegocio').addEventListener('change', updateNegocioMetrics);
+    document.getElementById('mesSelectNegocio').addEventListener('change', () => {
+      populateNegocioOptionsForSelectedMonth();
+      updateNegocioMetrics();
+    });
     document.getElementById('negocioSelect').addEventListener('change', updateNegocioMetrics);
-    document.getElementById('mesSelectOC').addEventListener('change', updateOCMetrics);
+    document.getElementById('mesSelectOC').addEventListener('change', () => {
+      populateOCOptionsForSelectedMonth();
+      updateOCMetrics();
+    });
     document.getElementById('ocSelect').addEventListener('change', updateOCMetrics);
 
     document.getElementById('clearHistoricosBtn').addEventListener('click', () => {
@@ -336,7 +445,9 @@
           localStorage.removeItem(key);
         }
       }
-      alert('Históricos guardados eliminados. Recarga la página para cargar desde archivos.');
+      historicos = {};
+      alert('Históricos guardados eliminados.');
+      loadHistoricos();
     });
 
     loadHistoricos();

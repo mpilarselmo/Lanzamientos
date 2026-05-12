@@ -136,6 +136,7 @@ const els = {
   comparisonControls: document.getElementById("comparisonControls"),
   comparisonTable: document.getElementById("comparisonTable"),
   lanzamientoTable: document.getElementById("lanzamientoTable"),
+  exportLanzamientoBtn: document.getElementById("exportLanzamientoBtn"),
   exportBtn: document.getElementById("exportBtn"),
   exportDetailedBtn: document.getElementById("exportDetailedBtn"),
   saveHistoryBtn: document.getElementById("saveHistoryBtn"),
@@ -150,6 +151,7 @@ els.loadBtn.addEventListener("click", onLoadFiles);
 els.addLaunchPlanBtn.addEventListener("click", addLaunchPlanRow);
 els.applyBtn.addEventListener("click", refreshAnalysis);
 els.chartType.addEventListener("change", () => renderChart());
+els.exportLanzamientoBtn.addEventListener("click", exportLanzamientoConsolidadoExcel);
 els.exportBtn.addEventListener("click", exportComparisonCsv);
 els.exportDetailedBtn.addEventListener("click", exportDetailedReport);
 els.saveHistoryBtn.addEventListener("click", saveHistorico);
@@ -2063,26 +2065,7 @@ function renderLanzamientoReport() {
   }
   
   els.lanzamientoSection.classList.remove("hidden");
-  
-  const columns = [
-    { key: "mes", label: "Mes" },
-    { key: "oc", label: "OC" },
-    { key: "negocio", label: "Negocio" },
-    { key: "articulo", label: "Articulo" },
-    { key: "fechaInicio", label: "Fecha Inicio" },
-    { key: "cantidadPedida", label: "Plan" },
-    { key: "cantidadFacturada", label: "Bultos Facturados" },
-    { key: "pctAvance", label: "% Avance Facturado" },
-    { key: "cantidadCargaProceso", label: "Entrega en el corto" },
-    { key: "pctCargaProceso", label: "% Avance de entrega en corto" },
-    { key: "pctAvanceTotal", label: "% Avance Total" },
-    { key: "cantidadCancelado", label: "Cancelado" },
-    { key: "pctCancelado", label: "% Cancelado" },
-    { key: "diasRestantes", label: "Dias Restantes" },
-    { key: "ns15", label: "NS 15 días" },
-    { key: "nivelServicio", label: "NS" },
-    { key: "daysTo100", label: "Días para cubrir el plan 100%" },
-  ];
+  const columns = getLanzamientoColumns();
   
   const thead = els.lanzamientoTable.querySelector("thead");
   const tbody = els.lanzamientoTable.querySelector("tbody");
@@ -2112,6 +2095,64 @@ function renderLanzamientoReport() {
   });
   
   tbody.innerHTML = lines.join("");
+}
+
+function getLanzamientoColumns() {
+  return [
+    { key: "mes", label: "Mes" },
+    { key: "oc", label: "OC" },
+    { key: "negocio", label: "Negocio" },
+    { key: "articulo", label: "Articulo" },
+    { key: "fechaInicio", label: "Fecha Inicio" },
+    { key: "cantidadPedida", label: "Plan" },
+    { key: "cantidadFacturada", label: "Bultos Facturados" },
+    { key: "pctAvance", label: "% Avance Facturado" },
+    { key: "cantidadCargaProceso", label: "Entrega en el corto" },
+    { key: "pctCargaProceso", label: "% Avance de entrega en corto" },
+    { key: "pctAvanceTotal", label: "% Avance Total" },
+    { key: "cantidadCancelado", label: "Cancelado" },
+    { key: "pctCancelado", label: "% Cancelado" },
+    { key: "diasRestantes", label: "Dias Restantes" },
+    { key: "ns15", label: "NS 15 días" },
+    { key: "nivelServicio", label: "NS" },
+    { key: "daysTo100", label: "Días para cubrir el plan 100%" },
+  ];
+}
+
+function exportLanzamientoConsolidadoExcel() {
+  const report = buildLanzamientoReport();
+  if (!report.length) {
+    alert("No hay datos en Lanzamiento consolidado para exportar.");
+    return;
+  }
+
+  const columns = getLanzamientoColumns();
+  const rowsForExcel = report.map((row) => {
+    const excelRow = {};
+    for (const col of columns) {
+      let value = row[col.key];
+      const numericValue = Number(value);
+      if (!Number.isNaN(numericValue) && (col.key.includes("pct") || col.key === "nivelServicio" || col.key === "ns15")) {
+        value = Number(numericValue.toFixed(1));
+      } else if (col.key === "daysTo100") {
+        value = row.daysTo100 === null || row.daysTo100 === undefined ? "No cumple" : Math.round(row.daysTo100);
+      } else if (typeof value === "number") {
+        value = Math.round(value);
+      }
+      excelRow[col.label] = value;
+    }
+    return excelRow;
+  });
+
+  const ws = XLSX.utils.json_to_sheet(rowsForExcel);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Lanzamiento Consolidado");
+
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = String(today.getMonth() + 1).padStart(2, "0");
+  const d = String(today.getDate()).padStart(2, "0");
+  XLSX.writeFile(wb, `lanzamiento_consolidado_${y}${m}${d}.xlsx`);
 }
 
 function getNivelServicioClass(value) {

@@ -44,6 +44,10 @@
           <span>Archivo de estado (obligatorio)</span>
           <input id="estadoFile" type="file" accept=".xlsx,.xls,.csv">
         </label>
+        <label class="field">
+          <span>Cuentas de Supermercados (opcional, columna Casa Matriz)</span>
+          <input id="supermarketsFile" type="file" accept=".xlsx,.xls,.csv">
+        </label>
       </div>
       <div class="actions">
         <button id="loadBtn" class="btn btn-primary">Cargar y preparar analisis</button>
@@ -62,6 +66,16 @@
         <label class="field toggle-field">
           <span>Aplicar filtros</span>
           <input id="applyFilters" type="checkbox" checked>
+        </label>
+
+        <label class="field toggle-field">
+          <span>Excluir Casa Matriz de supermercados (usa columna Venta en Estado)</span>
+          <input id="excludeSupermarketAccounts" type="checkbox">
+        </label>
+
+        <label class="field toggle-field">
+          <span>Buscar por código artículo (omite segmentación por OC cliente)</span>
+          <input id="ignoreOcSegmentation" type="checkbox">
         </label>
 
         <label class="field">
@@ -88,6 +102,9 @@
 
     <section id="lanzamientoSection" class="panel hidden">
       <h2>Lanzamiento consolidado</h2>
+      <div class="table-actions">
+        <button id="exportConsolidadoBtn" class="btn">Exportar consolidado Excel</button>
+      </div>
       <div class="table-wrap lanzamiento-table-wrap">
         <table id="lanzamientoTable">
           <thead></thead>

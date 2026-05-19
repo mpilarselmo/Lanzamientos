@@ -3,6 +3,7 @@ const state = {
   lanzamientos: [], // Array of {code, rows, name}
   filteredEstadoRows: [],
   comparisonRows: [],
+  excludedCasaMatrizSet: new Set(),
   columns: {},
   chart: null,
   lanzamientoCode: "MANUAL",
@@ -16,6 +17,11 @@ const state = {
 };
 
 const METRIC_COLORS_STORAGE_KEY = "lanza_metric_colors";
+const DEFAULT_SUPERMARKETS_PATHS = [
+  "../../Cuentas de Supermercados.xlsx",
+  "../Cuentas de Supermercados.xlsx",
+  "Cuentas de Supermercados.xlsx",
+];
 
 // Datos hardcodeados de Negocio-Segmento
 const NEGOCIO_SEGMENTO_DATA = [
@@ -99,7 +105,7 @@ const CODIGO_VTA_1_SEGMENTO_DATA = [
 const CATEGORY_LABELS = {
   facturada_hoy_580_610: "Facturado hoy 580/610",
   facturada_610_999: "Facturado 610/999",
-  depurado_980_984_999: "Depurado 980/999 y 984/999",
+  depurado_980_984_999: "Depurado 980/982/984",
   listo_cargar_560_565: "Listo cargar 560/565",
   carga_proceso_535_555: "Carga proceso 535-555",
   sin_carga_menor_535: "Sin carga < 535",
@@ -131,6 +137,7 @@ const DEFAULT_METRIC_COLORS = {
 
 const els = {
   estadoFile: document.getElementById("estadoFile"),
+  supermarketsFile: document.getElementById("supermarketsFile"),
   launchPlansContainer: document.getElementById("launchPlansContainer"),
   addLaunchPlanBtn: document.getElementById("addLaunchPlanBtn"),
   loadBtn: document.getElementById("loadBtn"),
@@ -139,6 +146,8 @@ const els = {
   resultsSection: document.getElementById("resultsSection"),
   lanzamientoSection: document.getElementById("lanzamientoSection"),
   applyFilters: document.getElementById("applyFilters"),
+  excludeSupermarketAccounts: document.getElementById("excludeSupermarketAccounts"),
+  ignoreOcSegmentation: document.getElementById("ignoreOcSegmentation"),
   vigenciaDate: document.getElementById("vigenciaDate"),
   ocSelect: document.getElementById("ocSelect"),
   tpContainer: document.getElementById("tpContainer"),
@@ -150,6 +159,7 @@ const els = {
   comparisonControls: document.getElementById("comparisonControls"),
   comparisonTable: document.getElementById("comparisonTable"),
   lanzamientoTable: document.getElementById("lanzamientoTable"),
+  exportConsolidadoBtn: document.getElementById("exportConsolidadoBtn"),
   exportBtn: document.getElementById("exportBtn"),
   exportDetailedBtn: document.getElementById("exportDetailedBtn"),
   saveHistoryBtn: document.getElementById("saveHistoryBtn"),
@@ -166,10 +176,16 @@ els.applyBtn.addEventListener("click", refreshAnalysis);
 els.chartType.addEventListener("change", () => renderChart());
 els.exportBtn.addEventListener("click", exportComparisonCsv);
 els.exportDetailedBtn.addEventListener("click", exportDetailedReport);
+els.exportConsolidadoBtn.addEventListener("click", exportLanzamientoConsolidadoExcel);
 els.saveHistoryBtn.addEventListener("click", saveHistorico);
 els.closeMonthBtn.addEventListener("click", closeMonth);
 
 els.applyFilters.addEventListener("change", () => refreshAnalysis());
+els.excludeSupermarketAccounts.addEventListener("change", () => refreshAnalysis());
+els.ignoreOcSegmentation.addEventListener("change", () => {
+  updateOcFilterAvailability();
+  refreshAnalysis();
+});
 els.ocSelect.addEventListener("change", () => refreshAnalysis());
 els.vigenciaDate.addEventListener("change", () => {
   normalizeDateField(els.vigenciaDate);
@@ -287,6 +303,26 @@ function parseIntSafe(value) {
   return match ? Number(match[0]) : null;
 }
 
+function parseEstadoCode(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.round(value);
+  }
+
+  const text = String(value || "").trim();
+  if (!text) {
+    return null;
+  }
+
+  const compact = text.replace(/\s/g, "");
+  if (!/^[-+]?\d+(?:[\.,]0+)?$/.test(compact)) {
+    return null;
+  }
+
+  const normalized = compact.replace(",", ".");
+  const numeric = Number(normalized);
+  return Number.isFinite(numeric) ? Math.round(numeric) : null;
+}
+
 function normalizeArticleCode(value) {
   const text = String(value || "").trim();
   if (!text) {
@@ -294,6 +330,72 @@ function normalizeArticleCode(value) {
   }
   const asInt = parseIntSafe(text);
   return asInt !== null ? String(asInt) : text.toUpperCase();
+}
+
+function shouldExcludeSupermarketAccounts() {
+  return Boolean(els.excludeSupermarketAccounts && els.excludeSupermarketAccounts.checked);
+}
+
+function shouldIgnoreOcSegmentation() {
+  return Boolean(els.ignoreOcSegmentation && els.ignoreOcSegmentation.checked);
+}
+
+function updateOcFilterAvailability() {
+  const ignoreOc = shouldIgnoreOcSegmentation();
+  if (els.ocSelect) {
+    els.ocSelect.disabled = ignoreOc;
+    if (ignoreOc) {
+      els.ocSelect.value = "Todos";
+    }
+  }
+}
+
+function buildComparisonKey(oc, articulo) {
+  return shouldIgnoreOcSegmentation()
+    ? `ART||${articulo}`
+    : `OC||${normalizeOcKey(oc)}||ART||${articulo}`;
+}
+
+function buildExcludedCasaMatrizSet(rows) {
+  if (!rows || !rows.length) {
+    return new Set();
+  }
+
+  const casaMatrizColumn = findColumn(rows, ["casa matriz"]);
+  if (!casaMatrizColumn) {
+    return new Set();
+  }
+
+  const values = rows
+    .map((row) => normalizeLabel(row[casaMatrizColumn]))
+    .filter(Boolean);
+
+  return new Set(values);
+}
+
+function applyEstadoPreFilters(rows) {
+  let filtered = [...rows];
+
+  if (els.applyFilters && els.applyFilters.checked && state.columns.estadoTp) {
+    const selectedTp = selectedTpSet();
+    filtered = filtered.filter((row) => {
+      const tpValue = String(row[state.columns.estadoTp] || "").trim().toUpperCase();
+      return selectedTp.has(tpValue);
+    });
+  }
+
+  if (
+    shouldExcludeSupermarketAccounts() &&
+    state.excludedCasaMatrizSet.size &&
+    state.columns.estadoVenta
+  ) {
+    filtered = filtered.filter((row) => {
+      const venta = normalizeLabel(row[state.columns.estadoVenta]);
+      return !venta || !state.excludedCasaMatrizSet.has(venta);
+    });
+  }
+
+  return filtered;
 }
 
 function parseDateValue(value) {
@@ -587,7 +689,7 @@ function scopeEstadoRowsToReferenceCodes(rows, referenceSet) {
 function classifyEstado(ultimo, siguiente) {
   if (ultimo === 580 && siguiente === 610) return "facturada_hoy_580_610";
   if (ultimo === 610 && siguiente === 999) return "facturada_610_999";
-  if ((ultimo === 980 || ultimo === 984 || ultimo === 955) && siguiente === 999) return "depurado_980_984_999";
+  if (ultimo === 980 || ultimo === 982 || ultimo === 984) return "depurado_980_984_999";
   if (ultimo === 560 && siguiente === 565) return "listo_cargar_560_565";
   if (ultimo === 527 || siguiente === 527) return "depurado_cuota_527";
   if ((ultimo !== null && ultimo >= 535 && ultimo <= 555) || (siguiente !== null && siguiente >= 535 && siguiente <= 555)) {
@@ -719,6 +821,26 @@ function findDateMin(rows, dateColumn) {
   return parsed[0];
 }
 
+async function loadDefaultSupermarketsRows() {
+  for (const relativePath of DEFAULT_SUPERMARKETS_PATHS) {
+    try {
+      const targetUrl = new URL(relativePath, window.location.href);
+      const response = await fetch(targetUrl.href, { cache: "no-store" });
+      if (!response.ok) {
+        continue;
+      }
+      const buffer = await response.arrayBuffer();
+      const data = readRowsFromBuffer(buffer, false);
+      if (data.rows && data.rows.length) {
+        return { rows: data.rows, source: relativePath };
+      }
+    } catch (error) {
+      // Si la ruta no existe o el navegador bloquea acceso local, probamos la siguiente.
+    }
+  }
+  return null;
+}
+
 async function onLoadFiles() {
   try {
     if (!els.estadoFile.files[0]) {
@@ -731,6 +853,20 @@ async function onLoadFiles() {
     const estadoFile = els.estadoFile.files[0];
     const estadoData = await readRowsFromFile(estadoFile, true);
     state.estadoRows = estadoData.rows;
+
+    state.excludedCasaMatrizSet = new Set();
+    let supermarketsSource = "";
+    if (els.supermarketsFile && els.supermarketsFile.files[0]) {
+      const supermarketsData = await readRowsFromFile(els.supermarketsFile.files[0], false);
+      state.excludedCasaMatrizSet = buildExcludedCasaMatrizSet(supermarketsData.rows);
+      supermarketsSource = els.supermarketsFile.files[0].name;
+    } else {
+      const defaultSupermarkets = await loadDefaultSupermarketsRows();
+      if (defaultSupermarkets) {
+        state.excludedCasaMatrizSet = buildExcludedCasaMatrizSet(defaultSupermarkets.rows);
+        supermarketsSource = defaultSupermarkets.source;
+      }
+    }
 
     if (!state.estadoRows.length) {
       els.loadStatus.textContent = "El archivo de estado no tiene filas legibles.";
@@ -795,12 +931,17 @@ async function onLoadFiles() {
 
     detectColumns();
     setupFilterControls();
+    updateOcFilterAvailability();
 
     els.filtersSection.classList.remove("hidden");
     els.resultsSection.classList.remove("hidden");
 
     refreshAnalysis();
-    els.loadStatus.textContent = `Estado cargado: ${estadoFile.name} | hoja ${estadoData.sheetName}. Lanzamientos: ${lanzamientoSummary}.`;
+    const excludedCount = state.excludedCasaMatrizSet.size;
+    const supermarketsSummary = excludedCount
+      ? ` | Cuentas supermercados: ${excludedCount} casas matriz excluibles${supermarketsSource ? ` (${supermarketsSource})` : ""}`
+      : "";
+    els.loadStatus.textContent = `Estado cargado: ${estadoFile.name} | hoja ${estadoData.sheetName}. Lanzamientos: ${lanzamientoSummary}.${supermarketsSummary}`;
   } catch (error) {
     console.error(error);
     els.loadStatus.textContent = `Error leyendo archivos: ${error.message}`;
@@ -823,6 +964,7 @@ function detectColumns() {
     estadoSegmento: findColumn(rows, ["codigo vta 1", "codigo segmento", "cod segmento", "segmento"]),
     estadoFecha: findColumn(rows, ["fecha de factura", "fecha factura", "fecha orden", "fecha pedido", "fecha solicitud"]),
     estadoCasaMatriz: findColumn(rows, ["casa matriz", "Casa Matriz", "numero principal"]),
+    estadoVenta: findColumn(rows, ["venta"]),
     estadoSucursal: findColumn(rows, ["sucursal", "Sucursal", "destino envio", "destino envío"]),
     estadoCantidadCancelada: findColumn(rows, ["cantidad cancelada", "cantidad cancelado", "cancelado"]),
     estadoArticuloEffective: null,
@@ -949,7 +1091,7 @@ function setupFilterControls() {
     item.className = "tp-item";
     const checkbox = document.createElement("input");
     checkbox.type = "checkbox";
-    checkbox.checked = true;
+    checkbox.checked = normalizeLabel(tp) !== "st";
     checkbox.value = tp;
     checkbox.dataset.tp = "1";
     const text = document.createElement("span");
@@ -975,6 +1117,8 @@ function setupFilterControls() {
   for (const node of els.tpContainer.querySelectorAll('input[data-tp="1"]')) {
     node.addEventListener("change", () => refreshAnalysis());
   }
+
+  updateOcFilterAvailability();
 }
 
 function selectedTpSet() {
@@ -983,10 +1127,8 @@ function selectedTpSet() {
 }
 
 function refreshAnalysis() {
-  // Ignorar filtros por ahora: el análisis debe funcionar con todos los datos del estado.
-  let filtered = [...state.estadoRows];
+  let filtered = applyEstadoPreFilters(state.estadoRows);
 
-  // No se aplica ningún filtro en esta etapa.
   state.filteredEstadoRows = filtered;
   const pedidoByArticle = buildPedidoByArticle();
   const referenceArticleCodes = new Set(
@@ -997,9 +1139,23 @@ function refreshAnalysis() {
   const scopedEstadoRows = scopeEstadoRowsToReferenceCodes(filtered, referenceArticleCodes);
   state.filteredEstadoRows = scopedEstadoRows;
 
+  let depuradoRowsCount = 0;
+  let depuradoCantidadSum = 0;
+  for (const row of scopedEstadoRows) {
+    const ultimo = parseEstadoCode(row[state.columns.estadoUltimo]);
+    const siguiente = parseEstadoCode(row[state.columns.estadoSiguiente]);
+    const category = classifyEstado(ultimo, siguiente);
+    if (category === "depurado_980_984_999") {
+      depuradoRowsCount += 1;
+      depuradoCantidadSum += getEstadoRowCantidad(row, category);
+    }
+  }
+
   const estadoByArticle = buildEstadoByArticle(scopedEstadoRows, referenceArticleCodes);
 
-  els.filtersMeta.textContent = `Filtros ignorados | Filas total estado: ${filtered.length} | Filas en alcance articulo: ${scopedEstadoRows.length} | Articulo usado: ${state.columns.estadoArticuloEffective || state.columns.estadoArticulo || "-"} | Cantidad usada: ${state.columns.estadoCantidad || "-"}`;
+  const excludeOn = shouldExcludeSupermarketAccounts();
+  const ignoreOcOn = shouldIgnoreOcSegmentation();
+  els.filtersMeta.textContent = `Filas estado tras prefiltros: ${filtered.length} | Filas en alcance articulo: ${scopedEstadoRows.length} | Depurado filas: ${depuradoRowsCount} | Depurado cantidad: ${Math.round(depuradoCantidadSum)} | Articulo usado: ${state.columns.estadoArticuloEffective || state.columns.estadoArticulo || "-"} | Cantidad usada: ${state.columns.estadoCantidad || "-"} | Excluir supermercados: ${excludeOn ? "ON" : "OFF"}${excludeOn ? ` (${state.excludedCasaMatrizSet.size} cuentas)` : ""} | Buscar por codigo sin OC: ${ignoreOcOn ? "ON" : "OFF"}`;
 
   state.comparisonRows = buildComparison(pedidoByArticle, estadoByArticle);
 
@@ -1272,6 +1428,17 @@ function buildOcArticuloCasaSucursalKey(oc, articulo, casaMatriz, sucursal) {
   return `${normalizeOcKey(oc)}||${articulo}||${normalizeLabel(casaMatriz)}||${normalizeLabel(sucursal)}`;
 }
 
+function getEstadoTpType(row) {
+  if (!state.columns.estadoTp) {
+    return "";
+  }
+  return String(row[state.columns.estadoTp] || "").trim().toUpperCase();
+}
+
+function isFacturadoCategory(category) {
+  return category === "facturada_hoy_580_610" || category === "facturada_610_999";
+}
+
 function buildPedidoByArticle() {
   const result = new Map();
 
@@ -1282,9 +1449,9 @@ function buildPedidoByArticle() {
         continue;
       }
       const oc = String(row[state.columns.lanzaOc] || "").trim() || "SIN_OC";
-      const key = buildOcArticuloKey(oc, articulo);
+      const key = buildComparisonKey(oc, articulo);
       const item = result.get(key) || {
-        oc,
+        oc: shouldIgnoreOcSegmentation() ? "Todos" : oc,
         articulo,
         descripcion: "",
         pedido: 0,
@@ -1313,9 +1480,9 @@ function buildPedidoByArticle() {
       continue;
     }
     const oc = String(row[state.columns.estadoOc] || "").trim() || "SIN_OC";
-    const key = buildOcArticuloKey(oc, articulo);
+    const key = buildComparisonKey(oc, articulo);
     const item = result.get(key) || {
-      oc,
+      oc: shouldIgnoreOcSegmentation() ? "Todos" : oc,
       articulo,
       descripcion: "",
       pedido: 0,
@@ -1333,10 +1500,9 @@ function buildPedidoByArticle() {
 function getEstadoRowCantidad(row, category) {
   let cantidad = Math.abs(parseNumber(row[state.columns.estadoCantidad]));
   if ((category === "depurado_980_984_999" || category === "depurado_cuota_527") && state.columns.estadoCantidadCancelada) {
-    const cantidadCancelada = Math.abs(parseNumber(row[state.columns.estadoCantidadCancelada]));
-    if (cantidadCancelada) {
-      cantidad = cantidadCancelada;
-    }
+    // Para depurados, si existe columna de cancelada, usar exclusivamente ese valor
+    // (aunque sea 0) para evitar inflar cancelaciones con cantidad enviada.
+    cantidad = Math.abs(parseNumber(row[state.columns.estadoCantidadCancelada]));
   }
   return cantidad;
 }
@@ -1353,17 +1519,19 @@ function buildEstadoByArticle(rows, referenceSet) {
   for (const row of rows) {
     const articulo = normalizeArticleCode(row[estadoArticuloColumn]);
     const oc = String(row[state.columns.estadoOc] || "").trim() || "SIN_OC";
-    const key = buildOcArticuloKey(oc, articulo);
+    const key = buildComparisonKey(oc, articulo);
     if (!articulo || (referenceSet.size && !referenceSet.has(articulo))) {
       continue;
     }
 
     const item = out.get(key) || {
-      oc,
+      oc: shouldIgnoreOcSegmentation() ? "Todos" : oc,
       articulo,
       descripcion: "",
       facturada_hoy_580_610: 0,
       facturada_610_999: 0,
+      co_credito_cliente: 0,
+      x3_debito_transporte: 0,
       depurado_980_984_999: 0,
       listo_cargar_560_565: 0,
       carga_proceso_535_555: 0,
@@ -1376,10 +1544,25 @@ function buildEstadoByArticle(rows, referenceSet) {
       item.descripcion = item.descripcion || String(row[state.columns.estadoDescripcion] || "").trim();
     }
 
-    const ultimo = parseIntSafe(row[state.columns.estadoUltimo]);
-    const siguiente = parseIntSafe(row[state.columns.estadoSiguiente]);
+    const ultimo = parseEstadoCode(row[state.columns.estadoUltimo]);
+    const siguiente = parseEstadoCode(row[state.columns.estadoSiguiente]);
     const category = classifyEstado(ultimo, siguiente);
     const cantidad = getEstadoRowCantidad(row, category);
+
+    if (isFacturadoCategory(category)) {
+      const tpType = getEstadoTpType(row);
+      if (tpType === "CO") {
+        item.co_credito_cliente += cantidad;
+        out.set(key, item);
+        continue;
+      }
+      if (tpType === "3X") {
+        item.x3_debito_transporte += cantidad;
+        out.set(key, item);
+        continue;
+      }
+    }
+
     item[category] += cantidad;
 
     out.set(key, item);
@@ -1391,12 +1574,16 @@ function buildEstadoByArticle(rows, referenceSet) {
 function buildComparison(pedidoByArticle, estadoByArticle) {
   const rows = [];
 
-  for (const [key, pedidoItem] of pedidoByArticle.entries()) {
-    const [oc, articulo] = String(key).split("||");
+  for (const pedidoItem of pedidoByArticle.values()) {
+    const oc = pedidoItem.oc || "SIN_OC";
+    const articulo = pedidoItem.articulo;
+    const key = buildComparisonKey(oc, articulo);
     const estadoItem = estadoByArticle.get(key) || {
       descripcion: "",
       facturada_hoy_580_610: 0,
       facturada_610_999: 0,
+      co_credito_cliente: 0,
+      x3_debito_transporte: 0,
       depurado_980_984_999: 0,
       listo_cargar_560_565: 0,
       carga_proceso_535_555: 0,
@@ -1410,9 +1597,10 @@ function buildComparison(pedidoByArticle, estadoByArticle) {
     let segmento = "";
     let ocDisplay = pedidoItem.oc || oc || "";
     for (const estadoRow of state.filteredEstadoRows) {
-      const rowArticulo = normalizeArticleCode(estadoRow[state.columns.estadoArticulo]);
+      const rowArticulo = normalizeArticleCode(estadoRow[state.columns.estadoArticuloEffective || state.columns.estadoArticulo]);
       const rowOc = String(estadoRow[state.columns.estadoOc] || "").trim();
-      if (rowArticulo === articulo && (!rowOc || normalizeLabel(rowOc) === normalizeLabel(ocDisplay))) {
+      const ocMatches = shouldIgnoreOcSegmentation() || !rowOc || normalizeLabel(rowOc) === normalizeLabel(ocDisplay);
+      if (rowArticulo === articulo && ocMatches) {
         if (!negocio && state.columns.estadoNegocio) {
           const rawNegocio = String(estadoRow[state.columns.estadoNegocio] || "").trim();
           negocio = getNegocioDescripcion(rawNegocio);
@@ -1438,6 +1626,8 @@ function buildComparison(pedidoByArticle, estadoByArticle) {
       oc: ocDisplay,
       facturada_hoy_580_610: estadoItem.facturada_hoy_580_610,
       facturada_610_999: estadoItem.facturada_610_999,
+      co_credito_cliente: estadoItem.co_credito_cliente,
+      x3_debito_transporte: estadoItem.x3_debito_transporte,
       total_facturado: totalFacturado,
       depurado_980_984_999: estadoItem.depurado_980_984_999,
       listo_cargar_560_565: estadoItem.listo_cargar_560_565,
@@ -1457,6 +1647,8 @@ function totalsFromComparison() {
     pedido: 0,
     facturada_hoy_580_610: 0,
     facturada_610_999: 0,
+    co_credito_cliente: 0,
+    x3_debito_transporte: 0,
     depurado_980_984_999: 0,
     listo_cargar_560_565: 0,
     carga_proceso_535_555: 0,
@@ -1485,6 +1677,8 @@ function renderCards() {
     ["Pedida", totals.pedido],
     ["Facturado hoy 580/610", totals.facturada_hoy_580_610],
     ["Facturado 610/999", totals.facturada_610_999],
+    ["CO (credito cliente)", totals.co_credito_cliente],
+    ["3X (debito transporte)", totals.x3_debito_transporte],
     ["Total facturado", totals.total_facturado],
     ["% avance facturado", `${avancePct.toFixed(1)}%`],
     ["En proceso", totals.en_proceso],
@@ -1573,7 +1767,16 @@ function buildLineSeries() {
       continue;
     }
     const dateKey = toDateInputValue(dt);
-    const cat = classifyEstado(parseIntSafe(row[state.columns.estadoUltimo]), parseIntSafe(row[state.columns.estadoSiguiente]));
+    const cat = classifyEstado(
+      parseEstadoCode(row[state.columns.estadoUltimo]),
+      parseEstadoCode(row[state.columns.estadoSiguiente])
+    );
+    if (isFacturadoCategory(cat)) {
+      const tpType = getEstadoTpType(row);
+      if (tpType === "CO" || tpType === "3X") {
+        continue;
+      }
+    }
     const amount = Math.abs(parseNumber(row[state.columns.estadoCantidad]));
     const key = `${dateKey}|${cat}`;
     bucket.set(key, (bucket.get(key) || 0) + amount);
@@ -1615,6 +1818,8 @@ function renderComparisonTable() {
     "pedido",
     "facturada_hoy_580_610",
     "facturada_610_999",
+    "co_credito_cliente",
+    "x3_debito_transporte",
     "total_facturado",
     "depurado_980_984_999",
     "listo_cargar_560_565",
@@ -1649,6 +1854,8 @@ function exportComparisonCsv() {
     "pedido",
     "facturada_hoy_580_610",
     "facturada_610_999",
+    "co_credito_cliente",
+    "x3_debito_transporte",
     "total_facturado",
     "depurado_980_984_999",
     "listo_cargar_560_565",
@@ -1761,8 +1968,8 @@ function exportDetailedReport() {
       item.descripcion = item.descripcion || String(row[state.columns.estadoDescripcion] || "").trim();
     }
 
-    const ultimo = parseIntSafe(row[state.columns.estadoUltimo]);
-    const siguiente = parseIntSafe(row[state.columns.estadoSiguiente]);
+    const ultimo = parseEstadoCode(row[state.columns.estadoUltimo]);
+    const siguiente = parseEstadoCode(row[state.columns.estadoSiguiente]);
     const category = classifyEstado(ultimo, siguiente);
     const cantidad = getEstadoRowCantidad(row, category);
     item[category] += cantidad;
@@ -1847,6 +2054,57 @@ function exportDetailedReport() {
   setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
+function exportLanzamientoConsolidadoExcel() {
+  const report = buildLanzamientoReport();
+  if (!report.length) {
+    alert("No hay datos en el consolidado para exportar.");
+    return;
+  }
+
+  const columns = [
+    { key: "mes", label: "Mes" },
+    { key: "oc", label: "OC" },
+    { key: "negocio", label: "Negocio" },
+    { key: "articulo", label: "Articulo" },
+    { key: "descripcion", label: "Descripcion" },
+    { key: "fechaInicio", label: "Fecha Inicio" },
+    { key: "cantidadPedida", label: "Plan" },
+    { key: "cantidadFacturada", label: "Bultos Facturados" },
+    { key: "cantidadCO", label: "CO" },
+    { key: "cantidad3X", label: "3X" },
+    { key: "pctAvance", label: "% Avance Facturado" },
+    { key: "cantidadCargaProceso", label: "Entrega en el corto" },
+    { key: "pctCargaProceso", label: "% Avance de entrega en corto" },
+    { key: "pctAvanceTotal", label: "% Avance Total" },
+    { key: "cantidadCancelado", label: "Cancelado" },
+    { key: "pctCancelado", label: "% Cancelado" },
+    { key: "diasRestantes", label: "Dias Restantes" },
+    { key: "ns15", label: "NS 15 dias" },
+    { key: "nivelServicio", label: "NS" },
+    { key: "daysTo100", label: "Dias para cubrir el plan 100%" },
+  ];
+
+  const rows = report.map((row) => {
+    const out = {};
+    for (const column of columns) {
+      let value = row[column.key];
+      if (column.key === "daysTo100") {
+        value = row.daysTo100 === null || row.daysTo100 === undefined ? "No cumple" : Math.round(row.daysTo100);
+      }
+      out[column.label] = value;
+    }
+    return out;
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Lanzamiento Consolidado");
+
+  const now = new Date();
+  const stamp = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+  XLSX.writeFile(workbook, `lanzamiento_consolidado_${stamp}.xlsx`);
+}
+
 function escapeHtml(text) {
   return text
     .replace(/&/g, "&amp;")
@@ -1872,7 +2130,7 @@ function buildLanzamientoReport() {
     const articulo = normalizeArticleCode(row[state.columns.estadoArticuloEffective || state.columns.estadoArticulo]);
     const oc = String(row[state.columns.estadoOc] || "").trim() || "SIN_OC";
     if (!articulo) continue;
-    const key = buildOcArticuloKey(oc, articulo);
+    const key = buildComparisonKey(oc, articulo);
     if (!estadoByOcArticulo.has(key)) estadoByOcArticulo.set(key, []);
     estadoByOcArticulo.get(key).push(row);
   }
@@ -1894,16 +2152,16 @@ function buildLanzamientoReport() {
       fechaInicioDate: rowStartDate || null,
     };
 
-    const key = buildOcArticuloKey(oc, articulo);
-    const existing = planDataMap.get(key);
+    const comparisonKey = buildComparisonKey(oc, articulo);
+    const existing = planDataMap.get(comparisonKey);
     if (!existing) {
-      planDataMap.set(key, candidate);
+      planDataMap.set(comparisonKey, candidate);
     } else if (candidate.fechaInicioDate && existing.fechaInicioDate) {
       if (candidate.fechaInicioDate < existing.fechaInicioDate) {
-        planDataMap.set(key, candidate);
+        planDataMap.set(comparisonKey, candidate);
       }
     } else if (candidate.fechaInicioDate && !existing.fechaInicioDate) {
-      planDataMap.set(key, candidate);
+      planDataMap.set(comparisonKey, candidate);
     }
 
     const ocKey = normalizeOcKey(oc);
@@ -1927,11 +2185,11 @@ function buildLanzamientoReport() {
     const articulo = comp.articulo;
     
     // Filtrar por OC seleccionada
-    if (selectedOc !== "Todos" && oc !== selectedOc) {
+    if (!shouldIgnoreOcSegmentation() && selectedOc !== "Todos" && oc !== selectedOc) {
       continue;
     }
     
-    const key = buildOcArticuloKey(oc, articulo);
+    const key = buildComparisonKey(oc, articulo);
     const planData = planDataMap.get(key) || planDataByOc.get(normalizeOcKey(oc)) || { segmento: "", negocioPlan: "", fechaInicio: "", fechaInicioDate: null };
     
     // Si no existe entrada, crearla
@@ -1950,6 +2208,8 @@ function buildLanzamientoReport() {
         cantidadPedida: comp.pedido || 0,
         facturadaHoy: comp.facturada_hoy_580_610 || 0,
         facturada610: comp.facturada_610_999 || 0,
+        cantidadCO: comp.co_credito_cliente || 0,
+        cantidad3X: comp.x3_debito_transporte || 0,
         cargaEnProceso: comp.carga_proceso_535_555 || 0,
         listoCargar: comp.listo_cargar_560_565 || 0,
         cancelado: comp.depurado_980_984_999 || 0,
@@ -1963,6 +2223,8 @@ function buildLanzamientoReport() {
       entry.cantidadPedida += comp.pedido || 0;
       entry.facturadaHoy += comp.facturada_hoy_580_610 || 0;
       entry.facturada610 += comp.facturada_610_999 || 0;
+      entry.cantidadCO += comp.co_credito_cliente || 0;
+      entry.cantidad3X += comp.x3_debito_transporte || 0;
       entry.cargaEnProceso += comp.carga_proceso_535_555 || 0;
       entry.listoCargar += comp.listo_cargar_560_565 || 0;
       entry.cancelado += comp.depurado_980_984_999 || 0;
@@ -1984,10 +2246,14 @@ function buildLanzamientoReport() {
       for (const row of entry.estadoRows) {
         const fecha = parseDateValue(row[state.columns.estadoFecha]);
         if (fecha && fecha <= end15) {
-          const ultimo = parseIntSafe(row[state.columns.estadoUltimo]);
-          const siguiente = parseIntSafe(row[state.columns.estadoSiguiente]);
+          const ultimo = parseEstadoCode(row[state.columns.estadoUltimo]);
+          const siguiente = parseEstadoCode(row[state.columns.estadoSiguiente]);
           const category = classifyEstado(ultimo, siguiente);
           if (category === "facturada_hoy_580_610" || category === "facturada_610_999") {
+            const tpType = getEstadoTpType(row);
+            if (tpType === "CO" || tpType === "3X") {
+              continue;
+            }
             facturado15 += getEstadoRowCantidad(row, category);
           }
         }
@@ -2003,10 +2269,14 @@ function buildLanzamientoReport() {
       for (const row of entry.estadoRows) {
         const fecha = parseDateValue(row[state.columns.estadoFecha]);
         if (fecha && fecha <= hoy) {
-          const ultimo = parseIntSafe(row[state.columns.estadoUltimo]);
-          const siguiente = parseIntSafe(row[state.columns.estadoSiguiente]);
+          const ultimo = parseEstadoCode(row[state.columns.estadoUltimo]);
+          const siguiente = parseEstadoCode(row[state.columns.estadoSiguiente]);
           const category = classifyEstado(ultimo, siguiente);
           if (category === "facturada_hoy_580_610" || category === "facturada_610_999") {
+            const tpType = getEstadoTpType(row);
+            if (tpType === "CO" || tpType === "3X") {
+              continue;
+            }
             facturadoHastaHoy += getEstadoRowCantidad(row, category);
           }
         }
@@ -2023,10 +2293,14 @@ function buildLanzamientoReport() {
       for (const row of entry.estadoRows) {
         const fecha = parseDateValue(row[state.columns.estadoFecha]);
         if (!fecha) continue;
-        const ultimo = parseIntSafe(row[state.columns.estadoUltimo]);
-        const siguiente = parseIntSafe(row[state.columns.estadoSiguiente]);
+        const ultimo = parseEstadoCode(row[state.columns.estadoUltimo]);
+        const siguiente = parseEstadoCode(row[state.columns.estadoSiguiente]);
         const category = classifyEstado(ultimo, siguiente);
         if (category === "facturada_hoy_580_610" || category === "facturada_610_999") {
+          const tpType = getEstadoTpType(row);
+          if (tpType === "CO" || tpType === "3X") {
+            continue;
+          }
           facturadoTotal += getEstadoRowCantidad(row, category);
           if (!lastFactDate || fecha > lastFactDate) {
             lastFactDate = fecha;
@@ -2067,6 +2341,8 @@ for (const entry of reportMap.values()) {
         fechaInicio: fechaInicioText,
         cantidadPedida: Math.round(entry.cantidadPedida),
         cantidadFacturada: Math.round(cantidadFacturadaTotal),
+        cantidadCO: Math.round(entry.cantidadCO || 0),
+        cantidad3X: Math.round(entry.cantidad3X || 0),
         pctAvance,
         cantidadCargaProceso: Math.round(cantidadEnProcesoTotal),
         pctCargaProceso,
@@ -2119,6 +2395,8 @@ function renderLanzamientoReport() {
     { key: "fechaInicio", label: "Fecha Inicio" },
     { key: "cantidadPedida", label: "Plan" },
     { key: "cantidadFacturada", label: "Bultos Facturados" },
+    { key: "cantidadCO", label: "CO" },
+    { key: "cantidad3X", label: "3X" },
     { key: "pctAvance", label: "% Avance Facturado" },
     { key: "cantidadCargaProceso", label: "Entrega en el corto" },
     { key: "pctCargaProceso", label: "% Avance de entrega en corto" },
